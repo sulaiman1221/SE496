@@ -1,0 +1,21 @@
+# Editor config
+.vscode/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.next/
+
+# Supabase local dev
+supabase/.temp/
+supabase/.branches/
+
+# OS files
+.DS_Store
+Thumbs.db
