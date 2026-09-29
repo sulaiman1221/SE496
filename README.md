@@ -18,16 +18,37 @@ Readers only report `{ exam_id, reader_id, card_uid }`. All validation happens o
 ## Stack
 
 - **Database:** Supabase (PostgreSQL)
-- **Frontend / backend:** TBD
+- **Web app:** Next.js (App Router, TypeScript, Tailwind CSS)
 - **RFID hardware:** TBD (prototype: 5 readers, 5 cards)
 - **Email:** Microsoft 365 / Outlook (mocked during early prototype)
+
+## Getting started
+
+Requires Node.js 20+.
+
+```bash
+npm install
+cp .env.example .env.local   # then fill in the keys from Supabase -> Project Settings -> API Keys
+npm run dev
+```
+
+Open http://localhost:3000.
+
+The secret key is only used on the server. Never prefix it with `NEXT_PUBLIC_` and never commit `.env.local`.
+
+## Database changes
+
+Add a new file to `supabase/migrations/` named `<timestamp>_<description>.sql`. When it's merged into `main`, Supabase applies it automatically. Don't edit migrations that have already been applied; add a new one instead.
 
 ## Repo layout
 
 ```
+src/
+  app/            pages and routes
+  lib/supabase/   database client (server-side)
 supabase/
-  migrations/   SQL schema migrations, applied in order
-  seed.sql      demo data (5 students, courses, demo room)
+  migrations/     SQL schema migrations, applied in order
+  seed.sql        demo data (5 students, courses, demo room)
 ```
 
 ## Status
