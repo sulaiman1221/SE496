@@ -72,6 +72,18 @@ export function roomLabel(name: string, seatCount: number) {
   return `${name} (${seatCount} ${seatCount === 1 ? "seat" : "seats"})`;
 }
 
+// Muted colours for telling courses apart on the seat map, in course order.
+export const COURSE_COLORS = [
+  { bg: "#e4eaf2", border: "#b8c6d9", text: "#1f3a5f" },
+  { bg: "#f4ebd8", border: "#dcc79d", text: "#6b4f12" },
+  { bg: "#e3eee6", border: "#b3cfbb", text: "#2c5a3c" },
+  { bg: "#f1e4e7", border: "#d8b6be", text: "#6e2f3d" },
+];
+
+export function courseColor(index: number) {
+  return COURSE_COLORS[index % COURSE_COLORS.length];
+}
+
 export function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
