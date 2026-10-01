@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 
 // Server-side client using the secret key. Bypasses RLS, so it must only be
 // used in server components, server actions and route handlers.
@@ -13,7 +14,7 @@ export function createServerClient() {
     );
   }
 
-  return createClient(url, secretKey, {
+  return createClient<Database>(url, secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
