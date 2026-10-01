@@ -48,7 +48,7 @@ src/
   lib/supabase/   database client (server-side)
 supabase/
   migrations/     SQL schema migrations, applied in order
-  seed.sql        demo data (5 students, courses, demo room)
+  seed.sql        demo data (30 students, 2 courses, 3 rooms)
 ```
 
 ## Status
