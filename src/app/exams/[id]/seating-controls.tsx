@@ -2,30 +2,45 @@
 
 import { startTransition, useActionState, useState } from "react";
 import { RULE_LABELS, type SeatingRule } from "@/lib/seating";
-import { generateSeatingPlan, type GenerateSeatingState } from "../actions";
+import { approveSeatingPlan, generateSeatingPlan, type GenerateSeatingState } from "../actions";
 
 const initialState: GenerateSeatingState = { error: null };
 
+const primaryButton =
+  "rounded-[5px] bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-faint";
+const secondaryButton =
+  "rounded-[5px] border border-line bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:text-faint";
+
 export function SeatingControls({
   examId,
-  currentRule,
+  planRule,
   hasPlan,
   courseCount,
   spacingCapacity,
 }: {
   examId: string;
-  currentRule: SeatingRule;
+  planRule: SeatingRule | null;
   hasPlan: boolean;
   courseCount: number;
   spacingCapacity: number;
 }) {
-  const [state, formAction, pending] = useActionState(
+  const [generateState, generate, generating] = useActionState(
     generateSeatingPlan.bind(null, examId),
     initialState,
   );
-  const [rule, setRule] = useState<SeatingRule>(
-    currentRule === "alternate" && courseCount < 2 ? "none" : currentRule,
+  const [approveState, approve, approving] = useActionState(
+    () => approveSeatingPlan(examId),
+    initialState,
   );
+  const [rule, setRule] = useState<SeatingRule>(
+    planRule === "alternate" && courseCount < 2 ? "none" : (planRule ?? "none"),
+  );
+
+  const busy = generating || approving;
+  // Approve applies to the plan on screen, so it waits until a newly selected
+  // rule has been used to regenerate.
+  const ruleChanged = hasPlan && planRule !== null && rule !== planRule;
+  const error = approveState.error ?? generateState.error;
 
   const options: { value: SeatingRule; description: string }[] = [
     { value: "none", description: "Students fill the room from the front in random order." },
@@ -46,7 +61,7 @@ export function SeatingControls({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    startTransition(() => formAction(formData));
+    startTransition(() => generate(formData));
   }
 
   return (
@@ -75,24 +90,33 @@ export function SeatingControls({
         </ul>
       </fieldset>
 
-      <div className="mt-4 flex flex-wrap items-center gap-4">
-        <button
-          type="submit"
-          disabled={pending}
-          className={
-            hasPlan
-              ? "rounded-[5px] border border-line bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:text-faint"
-              : "rounded-[5px] bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-faint"
-          }
-        >
-          {pending ? "Generating…" : hasPlan ? "Regenerate" : "Generate seating"}
-        </button>
-        {state.error && (
-          <p role="alert" className="text-sm text-danger">
-            {state.error}
-          </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {hasPlan && (
+          <button
+            type="button"
+            onClick={() => startTransition(approve)}
+            disabled={busy || ruleChanged}
+            className={primaryButton}
+          >
+            {approving ? "Approving…" : "Approve plan"}
+          </button>
         )}
+        <button type="submit" disabled={busy} className={hasPlan ? secondaryButton : primaryButton}>
+          {generating ? "Generating…" : hasPlan ? "Regenerate" : "Generate seating"}
+        </button>
       </div>
+
+      {ruleChanged && (
+        <p className="mt-3 text-sm text-muted">
+          Regenerate to use the selected rule, or select {RULE_LABELS[planRule!]} again to
+          approve the current plan.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

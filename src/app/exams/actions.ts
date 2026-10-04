@@ -198,3 +198,33 @@ export async function generateSeatingPlan(
   refresh();
   return { error: null };
 }
+
+export type ApproveState = { error: string | null };
+
+// Approving locks the plan: generateSeatingPlan refuses approved exams.
+// Emailing students is a separate step.
+export async function approveSeatingPlan(examId: string): Promise<ApproveState> {
+  if (!isUuid(examId)) return { error: "Exam not found." };
+
+  const supabase = createServerClient();
+
+  const { count, error: countError } = await supabase
+    .from("seat_assignments")
+    .select("id", { count: "exact", head: true })
+    .eq("exam_id", examId);
+  if (countError) return { error: "Couldn't approve the plan. Try again." };
+  if (!count) return { error: "Generate a seating plan before approving it." };
+
+  // Only a generated plan can be approved, which also stops double approval.
+  const { data, error } = await supabase
+    .from("exams")
+    .update({ status: "approved" })
+    .eq("id", examId)
+    .eq("status", "generated")
+    .select("id");
+  if (error) return { error: "Couldn't approve the plan. Try again." };
+  if (data.length === 0) return { error: "This plan can't be approved right now. Refresh the page." };
+
+  refresh();
+  return { error: null };
+}

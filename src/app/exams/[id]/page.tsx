@@ -131,7 +131,7 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
           <div className="mt-4">
             <SeatingControls
               examId={exam.id}
-              currentRule={rule ?? "none"}
+              planRule={rule}
               hasPlan={hasPlan}
               courseCount={courses.length}
               spacingCapacity={spacingCapacity(seats)}
@@ -139,9 +139,15 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
           </div>
         )}
 
+        {hasPlan && !editable && (
+          <p className="mt-3 text-muted">This plan is approved and locked.</p>
+        )}
+
         {hasPlan ? (
           <>
-            <div className="mt-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
+            <div
+              className={`${editable ? "mt-8" : "mt-6"} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm`}
+            >
               <p className="text-muted tabular-nums">
                 {rule ? `${RULE_LABELS[rule]}. ` : ""}
                 {exam.seat_assignments.length} students seated,{" "}
