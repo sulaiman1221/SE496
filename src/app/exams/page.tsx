@@ -1,14 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import {
-  formatExamDate,
-  formatTime,
-  roomLabel,
-  statusColor,
-  statusLabel,
-  todayISODate,
-} from "@/lib/exams";
+import { formatExamDate, formatTime, roomLabel, statusLabel, todayISODate } from "@/lib/exams";
 
 async function getExams() {
   const supabase = createServerClient();
@@ -106,14 +99,7 @@ function ExamRow({ exam, isPast = false }: { exam: Exam; isPast?: boolean }) {
         <span className={isPast ? "" : "text-muted"}>
           {roomLabel(exam.rooms.name, exam.rooms.seats.filter((s) => s.is_active).length)}
         </span>
-        <span className="flex items-center gap-2 text-sm">
-          <span
-            aria-hidden
-            className="size-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: isPast ? "var(--faint)" : statusColor(exam.status) }}
-          />
-          {statusLabel(exam.status)}
-        </span>
+        <span className="text-sm">{statusLabel(exam.status)}</span>
       </Link>
     </li>
   );

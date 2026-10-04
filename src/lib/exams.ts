@@ -16,21 +16,8 @@ export const STATUS_LABELS: Record<ExamStatus, string> = {
   completed: "Completed",
 };
 
-export const STATUS_COLORS: Record<ExamStatus, string> = {
-  draft: "#a29d94",
-  generated: "#b7791f",
-  approved: "#1f3a5f",
-  notifications_sent: "#2f6b4f",
-  in_progress: "#2f6b4f",
-  completed: "#a29d94",
-};
-
 export function statusLabel(status: string) {
   return STATUS_LABELS[status as ExamStatus] ?? status;
-}
-
-export function statusColor(status: string) {
-  return STATUS_COLORS[status as ExamStatus] ?? "#a29d94";
 }
 
 // Exam dates are stored as plain calendar dates (YYYY-MM-DD) with no time

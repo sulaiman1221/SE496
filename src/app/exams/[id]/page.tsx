@@ -7,7 +7,6 @@ import {
   formatTimeRange,
   isUuid,
   roomLabel,
-  statusColor,
   statusLabel,
 } from "@/lib/exams";
 import { isSeatingRule, RULE_LABELS, spacingCapacity, type SeatingRule } from "@/lib/seating";
@@ -96,14 +95,7 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
         {formatExamDate(exam.exam_date, { withYear: true })},{" "}
         {formatTimeRange(exam.start_time, exam.end_time)} · {room}
       </p>
-      <p className="mt-3 flex items-center gap-2 text-sm">
-        <span
-          aria-hidden
-          className="size-1.5 rounded-full"
-          style={{ backgroundColor: statusColor(exam.status) }}
-        />
-        {statusLabel(exam.status)}
-      </p>
+      <p className="mt-3 text-sm">{statusLabel(exam.status)}</p>
 
       <section className="mt-10">
         <h2 className="text-sm font-medium">Courses</h2>
