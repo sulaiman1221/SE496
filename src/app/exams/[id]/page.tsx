@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createServerClient } from "@/lib/supabase/server";
 import {
   courseColor,
   formatExamDate,
@@ -9,26 +8,10 @@ import {
   roomLabel,
   statusLabel,
 } from "@/lib/exams";
+import { getExamDetail } from "@/lib/queries";
 import { isSeatingRule, RULE_LABELS, spacingCapacity, type SeatingRule } from "@/lib/seating";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
-
-async function getExam(id: string) {
-  const supabase = createServerClient();
-  const { data, error } = await supabase
-    .from("exams")
-    .select(
-      `id, title, exam_date, start_time, end_time, status, seating_constraints,
-       rooms(name, seats(id, seat_code, row_index, column_index, is_active)),
-       exam_courses(courses(id, course_code, course_name, enrollments(student_id))),
-       seat_assignments(seat_id, course_id, students(full_name, institution_student_id))`,
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error) throw new Error(`Could not load exam: ${error.message}`);
-  return data;
-}
 
 function savedRule(constraints: unknown): SeatingRule | null {
   if (constraints && typeof constraints === "object" && !Array.isArray(constraints)) {
@@ -42,7 +25,7 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
 
-  const exam = await getExam(id);
+  const exam = await getExamDetail(id);
   if (!exam) notFound();
 
   const courses = exam.exam_courses
@@ -140,7 +123,16 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
         )}
 
         {hasPlan && !editable && (
-          <p className="mt-3 text-muted">This plan is approved and locked.</p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+            <p className="text-muted">This plan is approved and locked.</p>
+            <a
+              href={`/exams/${exam.id}/pdf`}
+              download
+              className="rounded-[5px] border border-line bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-hover"
+            >
+              Download PDF
+            </a>
+          </div>
         )}
 
         {hasPlan ? (
