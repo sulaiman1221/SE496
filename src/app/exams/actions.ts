@@ -4,7 +4,11 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
 import { isUuid, todayISODate } from "@/lib/exams";
+import { MicrosoftSignInError, refreshTokens, sendMail } from "@/lib/microsoft";
+import { getExamDetail } from "@/lib/queries";
 import { generateSeating, isSeatingRule, type StudentInput } from "@/lib/seating";
+import { createSeatingPlanPdf } from "@/lib/seating-pdf";
+import { isTestAddress, seatEmail } from "@/lib/seat-email";
 
 export type CreateExamState = { error: string | null };
 
@@ -227,4 +231,157 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
 
   refresh();
   return { error: null };
+}
+
+export type SendSeatEmailsState = { error: string | null; message: string | null };
+
+// Emails each student their seat from the connected Outlook account. Students
+// who already got theirs are left out, so running it again retries only the
+// ones that failed or were skipped. Once nobody is left to email, the exam
+// moves to notifications_sent.
+export async function sendSeatEmails(examId: string): Promise<SendSeatEmailsState> {
+  const fail = (error: string) => ({ error, message: null });
+  if (!isUuid(examId)) return fail("Exam not found.");
+
+  const exam = await getExamDetail(examId).catch(() => undefined);
+  if (exam === undefined) return fail("Couldn't load the exam. Try again.");
+  if (!exam) return fail("Exam not found.");
+  if (exam.status !== "approved" && exam.status !== "notifications_sent") {
+    return fail("Approve the seating plan before emailing students.");
+  }
+  if (exam.seat_assignments.length === 0) return fail("This exam has no seating plan.");
+
+  const supabase = createServerClient();
+
+  const { data: sender, error: senderError } = await supabase
+    .from("email_sender")
+    .select("refresh_token")
+    .maybeSingle();
+  if (senderError) return fail("Couldn't load the Outlook account. Try again.");
+  if (!sender) return fail("Connect an Outlook account first.");
+
+  const alreadySent = new Set(
+    exam.seat_emails.filter((e) => e.status === "sent").map((e) => e.student_id),
+  );
+  const toSend = exam.seat_assignments.filter((a) => !alreadySent.has(a.student_id));
+  if (toSend.length === 0) return { error: null, message: "Every student has been emailed." };
+
+  let accessToken: string;
+  try {
+    const tokens = await refreshTokens(sender.refresh_token);
+    accessToken = tokens.accessToken;
+    if (tokens.refreshToken !== sender.refresh_token) {
+      await supabase
+        .from("email_sender")
+        .update({ refresh_token: tokens.refreshToken })
+        .eq("id", true);
+    }
+  } catch (e) {
+    if (e instanceof MicrosoftSignInError) {
+      return fail("The Outlook sign-in has expired. Connect the account again.");
+    }
+    console.error(e);
+    return fail("Couldn't sign in to Outlook. Try again.");
+  }
+
+  // The same seating plan PDF as the Download PDF button, attached to every email.
+  const plan = await createSeatingPlanPdf(exam).catch((e) => {
+    console.error(e);
+    return null;
+  });
+  if (!plan) return fail("Couldn't create the seating plan PDF. Try again.");
+  const planPdf = { name: plan.filename, contentType: "application/pdf", content: plan.pdf };
+
+  const courses = new Map(exam.exam_courses.map((ec) => [ec.courses.id, ec.courses]));
+  const seatCodes = new Map(exam.rooms.seats.map((s) => [s.id, s.seat_code]));
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  let unsaved = 0;
+  let signInExpired = false;
+
+  // One at a time, saving each result straight away, so a crash halfway
+  // through doesn't lose track of who already got an email.
+  for (const a of toSend) {
+    const email = a.students.email;
+    let status: "sent" | "failed" | "skipped";
+    let error: string | null = null;
+
+    if (isTestAddress(email)) {
+      status = "skipped";
+      error = "Test address, not sent.";
+    } else if (signInExpired) {
+      status = "failed";
+      error = "Not sent: the Outlook sign-in expired.";
+    } else {
+      const course = courses.get(a.course_id);
+      try {
+        await sendMail(accessToken, {
+          to: email,
+          ...seatEmail({
+            studentName: a.students.full_name,
+            examTitle: exam.title ?? `the ${course?.course_code ?? ""} exam`,
+            courseCode: course?.course_code ?? "",
+            courseName: course?.course_name ?? "",
+            examDate: exam.exam_date,
+            startTime: exam.start_time,
+            endTime: exam.end_time,
+            roomName: exam.rooms.name,
+            seatCode: seatCodes.get(a.seat_id) ?? "",
+          }),
+          attachments: [planPdf],
+        });
+        status = "sent";
+      } catch (e) {
+        status = "failed";
+        error = e instanceof Error ? e.message : "Unknown error.";
+        if (e instanceof MicrosoftSignInError) signInExpired = true;
+      }
+    }
+
+    if (status === "sent") sent++;
+    else if (status === "failed") failed++;
+    else skipped++;
+
+    const { error: saveError } = await supabase.from("seat_emails").upsert(
+      {
+        exam_id: exam.id,
+        student_id: a.student_id,
+        email,
+        status,
+        error,
+        sent_at: status === "sent" ? new Date().toISOString() : null,
+      },
+      { onConflict: "exam_id,student_id" },
+    );
+    if (saveError) unsaved++;
+  }
+
+  if (failed === 0 && unsaved === 0 && alreadySent.size + sent > 0) {
+    await supabase
+      .from("exams")
+      .update({ status: "notifications_sent" })
+      .eq("id", exam.id)
+      .eq("status", "approved");
+  }
+
+  refresh();
+
+  const summary = [
+    `${sent} ${sent === 1 ? "email" : "emails"} sent`,
+    failed > 0 && `${failed} failed`,
+    skipped > 0 && `${skipped} skipped (test ${skipped === 1 ? "address" : "addresses"})`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  if (signInExpired) {
+    return fail(`${summary}. The Outlook sign-in expired. Connect the account again, then retry.`);
+  }
+  if (unsaved > 0) {
+    return fail(`${summary}. Some results couldn't be saved, so those students may be emailed again.`);
+  }
+  if (failed > 0) return fail(`${summary}. Email students again to retry the failed ones.`);
+  return { error: null, message: `${summary}.` };
 }

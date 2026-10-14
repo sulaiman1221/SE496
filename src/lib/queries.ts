@@ -31,8 +31,9 @@ export async function getCourseOptions(): Promise<CourseOption[]> {
   }));
 }
 
-// Everything about one exam: room and seats, courses, and the seating plan.
-// Used by the exam page and the seating plan PDF.
+// Everything about one exam: room and seats, courses, the seating plan, and
+// whether each student has been emailed their seat. Used by the exam page,
+// the seating plan PDF and the seat emails.
 export async function getExamDetail(id: string) {
   const supabase = createServerClient();
   const { data, error } = await supabase
@@ -41,7 +42,8 @@ export async function getExamDetail(id: string) {
       `id, title, exam_date, start_time, end_time, status, seating_constraints,
        rooms(name, seats(id, seat_code, row_index, column_index, is_active)),
        exam_courses(courses(id, course_code, course_name, enrollments(student_id))),
-       seat_assignments(seat_id, course_id, students(full_name, institution_student_id))`,
+       seat_assignments(seat_id, student_id, course_id, students(full_name, institution_student_id, email)),
+       seat_emails(student_id, status, error)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -51,6 +53,19 @@ export async function getExamDetail(id: string) {
 }
 
 export type ExamDetail = NonNullable<Awaited<ReturnType<typeof getExamDetail>>>;
+
+// The Outlook account seat emails are sent from, or null if none is connected.
+// Leaves out the refresh token, which never needs to reach a page.
+export async function getEmailSender() {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("email_sender")
+    .select("email")
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not load the email account: ${error.message}`);
+  return data;
+}
 
 // Seat count is the number of active seats, which is what the seating plan
 // can actually use.

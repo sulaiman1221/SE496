@@ -99,6 +99,33 @@ export type Database = {
         }
         Relationships: []
       }
+      email_sender: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string
+          id: boolean
+          refresh_token: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email: string
+          id?: boolean
+          refresh_token: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string
+          id?: boolean
+          refresh_token?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       enrollments: {
         Row: {
           course_id: string
@@ -340,6 +367,64 @@ export type Database = {
           },
           {
             foreignKeyName: "seat_assignments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seat_emails: {
+        Row: {
+          created_at: string
+          email: string
+          error: string | null
+          exam_id: string
+          id: string
+          sent_at: string | null
+          status: string
+          student_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          error?: string | null
+          exam_id: string
+          id?: string
+          sent_at?: string | null
+          status: string
+          student_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          error?: string | null
+          exam_id?: string
+          id?: string
+          sent_at?: string | null
+          status?: string
+          student_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seat_emails_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seat_emails_exam_id_student_id_fkey"
+            columns: ["exam_id", "student_id"]
+            isOneToOne: true
+            referencedRelation: "seat_assignments"
+            referencedColumns: ["exam_id", "student_id"]
+          },
+          {
+            foreignKeyName: "seat_emails_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
             referencedRelation: "students"

@@ -8,10 +8,18 @@ import {
   roomLabel,
   statusLabel,
 } from "@/lib/exams";
-import { getExamDetail } from "@/lib/queries";
+import { getEmailSender, getExamDetail } from "@/lib/queries";
 import { isSeatingRule, RULE_LABELS, spacingCapacity, type SeatingRule } from "@/lib/seating";
+import { isTestAddress } from "@/lib/seat-email";
+import { EmailControls } from "./email-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
+
+const EMAIL_STATUS_LABELS: Record<string, string> = {
+  sent: "Sent",
+  failed: "Failed",
+  skipped: "Skipped",
+};
 
 function savedRule(constraints: unknown): SeatingRule | null {
   if (constraints && typeof constraints === "object" && !Array.isArray(constraints)) {
@@ -21,11 +29,14 @@ function savedRule(constraints: unknown): SeatingRule | null {
   return null;
 }
 
-export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
+export default async function ExamPage({ params, searchParams }: PageProps<"/exams/[id]">) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
 
-  const exam = await getExamDetail(id);
+  // Set by the Microsoft sign-in callback when connecting an account fails.
+  const { emailError } = await searchParams;
+
+  const [exam, sender] = await Promise.all([getExamDetail(id), getEmailSender()]);
   if (!exam) notFound();
 
   const courses = exam.exam_courses
@@ -55,9 +66,15 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
     ]),
   );
 
+  const seatEmails = new Map(exam.seat_emails.map((e) => [e.student_id, e]));
+
   // Seat-by-seat list, front row first.
   const assignmentRows = exam.seat_assignments
-    .map((a) => ({ seat: seatById.get(a.seat_id), occupant: occupants.get(a.seat_id)! }))
+    .map((a) => ({
+      seat: seatById.get(a.seat_id),
+      occupant: occupants.get(a.seat_id)!,
+      email: seatEmails.get(a.student_id),
+    }))
     .filter((a) => a.seat)
     .sort((a, b) => a.seat!.row - b.seat!.row || a.seat!.col - b.seat!.col);
 
@@ -66,6 +83,12 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
   const editable = exam.status === "draft" || exam.status === "generated";
   const heading = exam.title ?? courses.map((c) => c.course_code).join(", ");
   const room = roomLabel(exam.rooms.name, seats.length);
+
+  // Students who still need their seat email. Test addresses never get one,
+  // so they're counted separately.
+  const unsent = exam.seat_assignments.filter((a) => seatEmails.get(a.student_id)?.status !== "sent");
+  const testAddressCount = unsent.filter((a) => isTestAddress(a.students.email)).length;
+  const emailsRemaining = unsent.length - testAddressCount;
 
   return (
     <>
@@ -106,6 +129,23 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
           {studentCount} {studentCount === 1 ? "student" : "students"} in {room}
         </p>
       </section>
+
+      {hasPlan && !editable && (
+        <section className="mt-10">
+          <h2 className="text-sm font-medium">Student emails</h2>
+          <div className="mt-3">
+            <EmailControls
+              examId={exam.id}
+              sender={sender?.email ?? null}
+              remaining={emailsRemaining}
+              testAddresses={testAddressCount}
+              sentCount={exam.seat_assignments.length - unsent.length}
+              started={exam.seat_emails.length > 0}
+              connectError={typeof emailError === "string" ? emailError : null}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="mt-10">
         <h2 className="text-sm font-medium">Seating plan</h2>
@@ -175,16 +215,31 @@ export default async function ExamPage({ params }: PageProps<"/exams/[id]">) {
                   <th className="py-2 pr-4 font-normal">Seat</th>
                   <th className="py-2 pr-4 font-normal">Student</th>
                   <th className="py-2 pr-4 font-normal">ID</th>
-                  <th className="py-2 font-normal">Course</th>
+                  <th className="py-2 pr-4 font-normal">Course</th>
+                  {!editable && <th className="py-2 font-normal">Email</th>}
                 </tr>
               </thead>
               <tbody>
-                {assignmentRows.map(({ seat, occupant }) => (
+                {assignmentRows.map(({ seat, occupant, email }) => (
                   <tr key={seat!.id} className="border-b border-line">
                     <td className="py-2 pr-4 font-mono text-[13px]">{seat!.code}</td>
                     <td className="py-2 pr-4">{occupant.name}</td>
                     <td className="py-2 pr-4 tabular-nums text-muted">{occupant.studentNumber}</td>
-                    <td className="py-2 font-mono text-[13px]">{occupant.courseCode}</td>
+                    <td className="py-2 pr-4 font-mono text-[13px]">{occupant.courseCode}</td>
+                    {!editable && (
+                      <td
+                        title={email?.error ?? undefined}
+                        className={
+                          email?.status === "failed"
+                            ? "py-2 text-danger"
+                            : email?.status === "sent"
+                              ? "py-2"
+                              : "py-2 text-muted"
+                        }
+                      >
+                        {email ? (EMAIL_STATUS_LABELS[email.status] ?? email.status) : "Not sent"}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
