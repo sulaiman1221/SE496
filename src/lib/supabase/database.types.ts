@@ -475,6 +475,7 @@ export type Database = {
           created_at: string
           email: string
           full_name: string
+          gender: string | null
           id: string
           institution_student_id: string
           rfid_uid: string | null
@@ -484,6 +485,7 @@ export type Database = {
           created_at?: string
           email: string
           full_name: string
+          gender?: string | null
           id?: string
           institution_student_id: string
           rfid_uid?: string | null
@@ -493,6 +495,7 @@ export type Database = {
           created_at?: string
           email?: string
           full_name?: string
+          gender?: string | null
           id?: string
           institution_student_id?: string
           rfid_uid?: string | null

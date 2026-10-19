@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
+/* Dark mode follows data-theme on <html>, set by the theme toggle. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --paper: #fbfaf7;
+  --surface: #ffffff;
   --ink: #1d1c1a;
   --muted: #6b675f;
   --faint: #a29d94;
@@ -10,10 +14,27 @@
   --accent: #1f3a5f;
   --accent-hover: #172c47;
   --danger: #9f3a2c;
+  --selection: #dfe6ef;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #161513;
+  --surface: #1e1d1a;
+  --ink: #ecebe6;
+  --muted: #a39f97;
+  --faint: #6f6b63;
+  --line: #34322d;
+  --hover: #26251f;
+  --accent: #3d6699;
+  --accent-hover: #4a76ad;
+  --danger: #e2806f;
+  --selection: #2c3d55;
 }
 
 @theme inline {
   --color-paper: var(--paper);
+  --color-surface: var(--surface);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
@@ -32,5 +53,5 @@ body {
 }
 
 ::selection {
-  background: #dfe6ef;
+  background: var(--selection);
 }

@@ -6,7 +6,13 @@ import { createServerClient } from "@/lib/supabase/server";
 import { isUuid, todayISODate } from "@/lib/exams";
 import { MicrosoftSignInError, refreshTokens, sendMail } from "@/lib/microsoft";
 import { getExamDetail } from "@/lib/queries";
-import { generateSeating, isSeatingRule, type StudentInput } from "@/lib/seating";
+import {
+  generateSeating,
+  isGender,
+  isSeatingRule,
+  normalizeRules,
+  type StudentInput,
+} from "@/lib/seating";
 import { createSeatingPlanPdf } from "@/lib/seating-pdf";
 import { isTestAddress, seatEmail } from "@/lib/seat-email";
 
@@ -111,9 +117,11 @@ export async function generateSeatingPlan(
   _prev: GenerateSeatingState,
   formData: FormData,
 ): Promise<GenerateSeatingState> {
-  const rule = formData.get("rule");
+  // Any combination of rules, including none.
+  const values = formData.getAll("rule");
   if (!isUuid(examId)) return { error: "Exam not found." };
-  if (!isSeatingRule(rule)) return { error: "Choose a seating rule." };
+  if (!values.every(isSeatingRule)) return { error: "Choose seating rules from the list." };
+  const rules = normalizeRules(values);
 
   const supabase = createServerClient();
 
@@ -135,12 +143,15 @@ export async function generateSeatingPlan(
     .sort((a, b) => a.courses.course_code.localeCompare(b.courses.course_code))
     .map((ec) => ec.course_id);
 
-  if (rule === "alternate" && courseIds.length < 2) {
+  if (rules.includes("alternate") && courseIds.length < 2) {
     return { error: "Alternating courses needs at least two courses in the exam." };
   }
 
   const [enrollmentsRes, seatsRes] = await Promise.all([
-    supabase.from("enrollments").select("student_id, course_id").in("course_id", courseIds),
+    supabase
+      .from("enrollments")
+      .select("student_id, course_id, students(gender)")
+      .in("course_id", courseIds),
     supabase
       .from("seats")
       .select("id, seat_code, row_index, column_index")
@@ -153,12 +164,23 @@ export async function generateSeatingPlan(
   }
 
   const students = new Map<string, StudentInput>();
+  // Male and female students sit on separate sides, so everyone needs a gender.
+  const missingGender = new Set<string>();
   for (const courseId of courseIds) {
     for (const e of enrollmentsRes.data.filter((e) => e.course_id === courseId)) {
-      if (!students.has(e.student_id)) {
-        students.set(e.student_id, { id: e.student_id, courseId });
+      const gender = e.students.gender;
+      if (!isGender(gender)) missingGender.add(e.student_id);
+      else if (!students.has(e.student_id)) {
+        students.set(e.student_id, { id: e.student_id, courseId, gender });
       }
     }
+  }
+
+  if (missingGender.size > 0) {
+    const n = missingGender.size;
+    return {
+      error: `${n} ${n === 1 ? "student has" : "students have"} no gender set. Add it in the students table, then generate again.`,
+    };
   }
 
   const seats = seatsRes.data.map((s) => ({
@@ -168,7 +190,7 @@ export async function generateSeatingPlan(
     col: s.column_index,
   }));
 
-  const result = generateSeating(seats, [...students.values()], rule);
+  const result = generateSeating(seats, [...students.values()], rules);
   if (!result.ok) return { error: result.error };
 
   // Replace any previous plan for this exam.
@@ -195,7 +217,7 @@ export async function generateSeatingPlan(
 
   const { error: updateError } = await supabase
     .from("exams")
-    .update({ status: "generated", seating_constraints: { rule } })
+    .update({ status: "generated", seating_constraints: { rules } })
     .eq("id", exam.id);
   if (updateError) return { error: "The plan was saved but the exam status didn't update. Try again." };
 

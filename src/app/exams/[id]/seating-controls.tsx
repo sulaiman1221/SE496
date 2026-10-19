@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useState } from "react";
-import { RULE_LABELS, type SeatingRule } from "@/lib/seating";
+import { RULE_LABELS, roomCapacity, SEATING_RULES, type SeatingRule } from "@/lib/seating";
 import { approveSeatingPlan, generateSeatingPlan, type GenerateSeatingState } from "../actions";
 
 const initialState: GenerateSeatingState = { error: null };
@@ -9,20 +9,28 @@ const initialState: GenerateSeatingState = { error: null };
 const primaryButton =
   "rounded-[5px] bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-faint";
 const secondaryButton =
-  "rounded-[5px] border border-line bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:text-faint";
+  "rounded-[5px] border border-line bg-surface px-4 py-2 text-sm font-medium transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:text-faint";
+
+const RULE_DESCRIPTIONS: Record<SeatingRule, string> = {
+  spacing: "No two students sit side by side.",
+  rows: "Students sit in every other row, so nobody sits right behind another student.",
+  alternate: "No two students from the same course sit next to each other in a row.",
+};
 
 export function SeatingControls({
   examId,
-  planRule,
+  planRules,
   hasPlan,
   courseCount,
-  spacingCapacity,
+  rowSizes,
 }: {
   examId: string;
-  planRule: SeatingRule | null;
+  // The rules the current plan was generated with, or null if there's no plan.
+  planRules: SeatingRule[] | null;
   hasPlan: boolean;
   courseCount: number;
-  spacingCapacity: number;
+  // Number of seats in each row of the room, front row first.
+  rowSizes: number[];
 }) {
   const [generateState, generate, generating] = useActionState(
     generateSeatingPlan.bind(null, examId),
@@ -32,32 +40,28 @@ export function SeatingControls({
     () => approveSeatingPlan(examId),
     initialState,
   );
-  const [rule, setRule] = useState<SeatingRule>(
-    planRule === "alternate" && courseCount < 2 ? "none" : (planRule ?? "none"),
+  const [rules, setRules] = useState<SeatingRule[]>(() =>
+    (planRules ?? []).filter((rule) => rule !== "alternate" || courseCount >= 2),
   );
 
   const busy = generating || approving;
-  // Approve applies to the plan on screen, so it waits until a newly selected
-  // rule has been used to regenerate.
-  const ruleChanged = hasPlan && planRule !== null && rule !== planRule;
+  // Approve applies to the plan on screen, so it waits until newly selected
+  // rules have been used to regenerate.
+  const rulesChanged = hasPlan && planRules !== null && rules.join() !== planRules.join();
   const error = approveState.error ?? generateState.error;
+  const spaced = rules.includes("spacing") || rules.includes("rows");
 
-  const options: { value: SeatingRule; description: string }[] = [
-    { value: "none", description: "Students fill the room from the front in random order." },
-    {
-      value: "spacing",
-      description: `No two students sit side by side. Fits up to ${spacingCapacity} students in this room.`,
-    },
-  ];
-  if (courseCount >= 2) {
-    options.push({
-      value: "alternate",
-      description: "No two students from the same course sit side by side.",
-    });
+  const options = SEATING_RULES.filter((rule) => rule !== "alternate" || courseCount >= 2);
+
+  function toggle(rule: SeatingRule) {
+    // Kept in SEATING_RULES order, so it can be compared with the plan's rules.
+    setRules((current) =>
+      SEATING_RULES.filter((r) => (r === rule ? !current.includes(r) : current.includes(r))),
+    );
   }
 
   // Submit manually rather than via <form action>, which resets the form after
-  // the action and would put the radio back to its initial rule.
+  // the action and would clear the ticked rules.
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -67,27 +71,34 @@ export function SeatingControls({
   return (
     <form onSubmit={handleSubmit}>
       <fieldset>
-        <legend className="mb-2 text-sm text-muted">Rule</legend>
+        <legend className="mb-2 text-sm text-muted">Rules (pick any, or none)</legend>
         <ul>
-          {options.map((option) => (
-            <li key={option.value}>
+          {options.map((rule) => (
+            <li key={rule}>
               <label className="-mx-3 grid cursor-pointer grid-cols-[auto_1fr] gap-x-3 rounded-[5px] px-3 py-2 hover:bg-hover">
                 <input
-                  type="radio"
+                  type="checkbox"
                   name="rule"
-                  value={option.value}
-                  checked={rule === option.value}
-                  onChange={() => setRule(option.value)}
+                  value={rule}
+                  checked={rules.includes(rule)}
+                  onChange={() => toggle(rule)}
                   className="translate-y-[5px] accent-accent"
                 />
                 <span>
-                  {RULE_LABELS[option.value]}
-                  <span className="block text-sm text-muted">{option.description}</span>
+                  {RULE_LABELS[rule]}
+                  <span className="block text-sm text-muted">{RULE_DESCRIPTIONS[rule]}</span>
                 </span>
               </label>
             </li>
           ))}
         </ul>
+        {(rules.length === 0 || spaced) && (
+          <p className="mt-2 text-sm text-muted tabular-nums">
+            {rules.length === 0
+              ? "With no rules, students fill the room from the front in random order."
+              : `With these rules, this room fits up to ${roomCapacity(rowSizes, rules)} students.`}
+          </p>
+        )}
       </fieldset>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -95,7 +106,7 @@ export function SeatingControls({
           <button
             type="button"
             onClick={() => startTransition(approve)}
-            disabled={busy || ruleChanged}
+            disabled={busy || rulesChanged}
             className={primaryButton}
           >
             {approving ? "Approving…" : "Approve plan"}
@@ -106,10 +117,9 @@ export function SeatingControls({
         </button>
       </div>
 
-      {ruleChanged && (
+      {rulesChanged && (
         <p className="mt-3 text-sm text-muted">
-          Regenerate to use the selected rule, or select {RULE_LABELS[planRule!]} again to
-          approve the current plan.
+          Regenerate to use the selected rules, or change them back to approve the current plan.
         </p>
       )}
       {error && (

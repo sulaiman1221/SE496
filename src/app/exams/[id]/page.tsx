@@ -9,7 +9,7 @@ import {
   statusLabel,
 } from "@/lib/exams";
 import { getEmailSender, getExamDetail } from "@/lib/queries";
-import { isSeatingRule, RULE_LABELS, spacingCapacity, type SeatingRule } from "@/lib/seating";
+import { describeRules, isGender, savedRules, seatRows } from "@/lib/seating";
 import { isTestAddress } from "@/lib/seat-email";
 import { EmailControls } from "./email-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
@@ -20,14 +20,6 @@ const EMAIL_STATUS_LABELS: Record<string, string> = {
   failed: "Failed",
   skipped: "Skipped",
 };
-
-function savedRule(constraints: unknown): SeatingRule | null {
-  if (constraints && typeof constraints === "object" && !Array.isArray(constraints)) {
-    const rule = (constraints as Record<string, unknown>).rule;
-    if (isSeatingRule(rule)) return rule;
-  }
-  return null;
-}
 
 export default async function ExamPage({ params, searchParams }: PageProps<"/exams/[id]">) {
   const { id } = await params;
@@ -60,6 +52,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
       {
         name: a.students.full_name,
         studentNumber: a.students.institution_student_id,
+        gender: isGender(a.students.gender) ? a.students.gender : null,
         courseCode: courseCode.get(a.course_id) ?? "",
         courseIndex: courseIndex.get(a.course_id) ?? 0,
       },
@@ -78,7 +71,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
     .filter((a) => a.seat)
     .sort((a, b) => a.seat!.row - b.seat!.row || a.seat!.col - b.seat!.col);
 
-  const rule = savedRule(exam.seating_constraints);
+  const rules = savedRules(exam.seating_constraints);
   const hasPlan = exam.seat_assignments.length > 0;
   const editable = exam.status === "draft" || exam.status === "generated";
   const heading = exam.title ?? courses.map((c) => c.course_code).join(", ");
@@ -154,10 +147,10 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
           <div className="mt-4">
             <SeatingControls
               examId={exam.id}
-              planRule={rule}
+              planRules={rules}
               hasPlan={hasPlan}
               courseCount={courses.length}
-              spacingCapacity={spacingCapacity(seats)}
+              rowSizes={seatRows(seats).map((row) => row.length)}
             />
           </div>
         )}
@@ -168,7 +161,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
             <a
               href={`/exams/${exam.id}/pdf`}
               download
-              className="rounded-[5px] border border-line bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-hover"
+              className="rounded-[5px] border border-line bg-surface px-4 py-2 text-sm font-medium transition-colors hover:bg-hover"
             >
               Download PDF
             </a>
@@ -181,7 +174,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
               className={`${editable ? "mt-8" : "mt-6"} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm`}
             >
               <p className="text-muted tabular-nums">
-                {rule ? `${RULE_LABELS[rule]}. ` : ""}
+                {rules ? `${describeRules(rules)}. ` : ""}
                 {exam.seat_assignments.length} students seated,{" "}
                 {seats.length - exam.seat_assignments.length} seats empty.
               </p>

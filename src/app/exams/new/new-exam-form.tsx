@@ -8,7 +8,7 @@ import { createExam, type CreateExamState } from "../actions";
 const initialState: CreateExamState = { error: null };
 
 const inputClass =
-  "rounded-[5px] border border-line bg-white px-3 py-2 text-[15px] outline-none transition-colors focus:border-accent";
+  "rounded-[5px] border border-line bg-surface px-3 py-2 text-[15px] outline-none transition-colors focus:border-accent";
 
 export function NewExamForm({
   courses,
