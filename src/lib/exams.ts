@@ -45,13 +45,29 @@ export function formatTimeRange(start: string, end: string | null) {
   return end ? `${formatTime(start)}–${formatTime(end)}` : formatTime(start);
 }
 
-// Today's date as YYYY-MM-DD in the server's local time zone.
+const pad = (n: number) => String(n).padStart(2, "0");
+
+// A date as YYYY-MM-DD in the server's local time zone.
+function isoDate(date: Date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function todayISODate() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return isoDate(new Date());
+}
+
+// What the new exam form starts with: tomorrow at the current time, one hour
+// long. An exam can't run past midnight, so a late start ends at 23:59.
+export function newExamDefaults(now = new Date()) {
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const [hour, minute] = [now.getHours(), now.getMinutes()];
+
+  return {
+    date: isoDate(tomorrow),
+    startTime: `${pad(hour)}:${pad(minute)}`,
+    endTime: hour < 23 ? `${pad(hour + 1)}:${pad(minute)}` : "23:59",
+  };
 }
 
 // "Exam Hall (56 seats)"

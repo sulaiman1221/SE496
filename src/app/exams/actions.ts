@@ -7,6 +7,7 @@ import { isUuid, todayISODate } from "@/lib/exams";
 import { MicrosoftSignInError, refreshTokens, sendMail } from "@/lib/microsoft";
 import { getExamDetail } from "@/lib/queries";
 import {
+  frontRowChanged,
   generateSeating,
   isGender,
   isSeatingRule,
@@ -127,7 +128,9 @@ export async function generateSeatingPlan(
 
   const { data: exam, error: examError } = await supabase
     .from("exams")
-    .select("id, status, room_id, exam_courses(course_id, courses(course_code))")
+    .select(
+      "id, status, room_id, exam_courses(course_id, courses(course_code)), front_row_students(student_id)",
+    )
     .eq("id", examId)
     .maybeSingle();
 
@@ -136,6 +139,8 @@ export async function generateSeatingPlan(
   if (!EDITABLE_STATUSES.includes(exam.status)) {
     return { error: "This seating plan has been approved and can't be regenerated." };
   }
+
+  const frontRow = new Set(exam.front_row_students.map((f) => f.student_id));
 
   // Course order decides which course a student counts under if they're
   // enrolled in more than one of the exam's courses.
@@ -171,7 +176,12 @@ export async function generateSeatingPlan(
       const gender = e.students.gender;
       if (!isGender(gender)) missingGender.add(e.student_id);
       else if (!students.has(e.student_id)) {
-        students.set(e.student_id, { id: e.student_id, courseId, gender });
+        students.set(e.student_id, {
+          id: e.student_id,
+          courseId,
+          gender,
+          frontRow: frontRow.has(e.student_id),
+        });
       }
     }
   }
@@ -215,9 +225,12 @@ export async function generateSeatingPlan(
     return { error: "Couldn't save the seating plan. Try again." };
   }
 
+  // Saved with the plan, so the page can tell when the front-row students
+  // change after generating.
+  const seatedFrontRow = [...frontRow].filter((id) => students.has(id)).sort();
   const { error: updateError } = await supabase
     .from("exams")
-    .update({ status: "generated", seating_constraints: { rules } })
+    .update({ status: "generated", seating_constraints: { rules, frontRow: seatedFrontRow } })
     .eq("id", exam.id);
   if (updateError) return { error: "The plan was saved but the exam status didn't update. Try again." };
 
@@ -241,6 +254,17 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
   if (countError) return { error: "Couldn't approve the plan. Try again." };
   if (!count) return { error: "Generate a seating plan before approving it." };
 
+  const { data: exam, error: examError } = await supabase
+    .from("exams")
+    .select("seating_constraints, front_row_students(student_id)")
+    .eq("id", examId)
+    .maybeSingle();
+  if (examError || !exam) return { error: "Couldn't approve the plan. Try again." };
+  const currentFrontRow = exam.front_row_students.map((f) => f.student_id);
+  if (frontRowChanged(exam.seating_constraints, currentFrontRow)) {
+    return { error: "The front-row students changed. Regenerate the plan before approving it." };
+  }
+
   // Only a generated plan can be approved, which also stops double approval.
   const { data, error } = await supabase
     .from("exams")
@@ -250,6 +274,53 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
     .select("id");
   if (error) return { error: "Couldn't approve the plan. Try again." };
   if (data.length === 0) return { error: "This plan can't be approved right now. Refresh the page." };
+
+  refresh();
+  return { error: null };
+}
+
+export type FrontRowState = { error: string | null };
+
+// Marks or unmarks one student for the front row of an exam. Only before the
+// plan is approved; the next generation seats them first.
+export async function setFrontRow(
+  examId: string,
+  studentId: string,
+  frontRow: boolean,
+): Promise<FrontRowState> {
+  if (!isUuid(examId) || !isUuid(studentId)) return { error: "Student not found." };
+
+  const supabase = createServerClient();
+
+  const { data: exam, error: examError } = await supabase
+    .from("exams")
+    .select("status, exam_courses(course_id)")
+    .eq("id", examId)
+    .maybeSingle();
+  if (examError) return { error: "Couldn't update the front row. Try again." };
+  if (!exam) return { error: "Exam not found." };
+  if (!EDITABLE_STATUSES.includes(exam.status)) {
+    return { error: "This seating plan has been approved and can't be changed." };
+  }
+
+  const { count, error: enrolledError } = await supabase
+    .from("enrollments")
+    .select("id", { count: "exact", head: true })
+    .eq("student_id", studentId)
+    .in("course_id", exam.exam_courses.map((ec) => ec.course_id));
+  if (enrolledError) return { error: "Couldn't update the front row. Try again." };
+  if (!count) return { error: "This student isn't in the exam." };
+
+  const { error } = frontRow
+    ? await supabase
+        .from("front_row_students")
+        .upsert({ exam_id: examId, student_id: studentId }, { ignoreDuplicates: true })
+    : await supabase
+        .from("front_row_students")
+        .delete()
+        .eq("exam_id", examId)
+        .eq("student_id", studentId);
+  if (error) return { error: "Couldn't update the front row. Try again." };
 
   refresh();
   return { error: null };

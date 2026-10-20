@@ -31,9 +31,9 @@ export async function getCourseOptions(): Promise<CourseOption[]> {
   }));
 }
 
-// Everything about one exam: room and seats, courses, the seating plan, and
-// whether each student has been emailed their seat. Used by the exam page,
-// the seating plan PDF and the seat emails.
+// Everything about one exam: room and seats, courses and their students, the
+// seating plan, front-row students, and whether each student has been emailed
+// their seat. Used by the exam page, the seating plan PDF and the seat emails.
 export async function getExamDetail(id: string) {
   const supabase = createServerClient();
   const { data, error } = await supabase
@@ -41,7 +41,9 @@ export async function getExamDetail(id: string) {
     .select(
       `id, title, exam_date, start_time, end_time, status, seating_constraints,
        rooms(name, seats(id, seat_code, row_index, column_index, is_active)),
-       exam_courses(courses(id, course_code, course_name, enrollments(student_id))),
+       exam_courses(courses(id, course_code, course_name,
+         enrollments(student_id, students(full_name, institution_student_id)))),
+       front_row_students(student_id),
        seat_assignments(seat_id, student_id, course_id, students(full_name, institution_student_id, email, gender)),
        seat_emails(student_id, status, error)`,
     )

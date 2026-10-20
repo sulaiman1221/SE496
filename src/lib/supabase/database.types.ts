@@ -245,6 +245,39 @@ export type Database = {
           },
         ]
       }
+      front_row_students: {
+        Row: {
+          created_at: string
+          exam_id: string
+          student_id: string
+        }
+        Insert: {
+          created_at?: string
+          exam_id: string
+          student_id: string
+        }
+        Update: {
+          created_at?: string
+          exam_id?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "front_row_students_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "front_row_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       readers: {
         Row: {
           created_at: string

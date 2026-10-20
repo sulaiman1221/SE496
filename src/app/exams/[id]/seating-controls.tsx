@@ -23,6 +23,7 @@ export function SeatingControls({
   hasPlan,
   courseCount,
   rowSizes,
+  frontRowChanged,
 }: {
   examId: string;
   // The rules the current plan was generated with, or null if there's no plan.
@@ -31,6 +32,8 @@ export function SeatingControls({
   courseCount: number;
   // Number of seats in each row of the room, front row first.
   rowSizes: number[];
+  // Whether the front-row students changed since the plan was generated.
+  frontRowChanged: boolean;
 }) {
   const [generateState, generate, generating] = useActionState(
     generateSeatingPlan.bind(null, examId),
@@ -106,7 +109,7 @@ export function SeatingControls({
           <button
             type="button"
             onClick={() => startTransition(approve)}
-            disabled={busy || rulesChanged}
+            disabled={busy || rulesChanged || frontRowChanged}
             className={primaryButton}
           >
             {approving ? "Approving…" : "Approve plan"}
@@ -120,6 +123,11 @@ export function SeatingControls({
       {rulesChanged && (
         <p className="mt-3 text-sm text-muted">
           Regenerate to use the selected rules, or change them back to approve the current plan.
+        </p>
+      )}
+      {frontRowChanged && !rulesChanged && (
+        <p className="mt-3 text-sm text-muted">
+          The front-row students changed. Regenerate to seat them first.
         </p>
       )}
       {error && (

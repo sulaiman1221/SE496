@@ -17,6 +17,10 @@
 // The two sides are split as close to the middle as both groups allow, at an
 // aisle or with an empty column between them, and the rules apply within
 // each side. An exam with only one gender uses the whole room.
+//
+// Students the instructor marked for the front row (for a disability or an
+// injury) are seated first, in the front-most row their side allows. If there
+// are more of them than the front row holds, the rest go in the next row.
 
 export type SeatingRule = "spacing" | "rows" | "alternate";
 export type Gender = "male" | "female";
@@ -31,7 +35,7 @@ export const RULE_LABELS: Record<SeatingRule, string> = {
 };
 
 export type SeatInput = { id: string; code: string; row: number; col: number };
-export type StudentInput = { id: string; courseId: string; gender: Gender };
+export type StudentInput = { id: string; courseId: string; gender: Gender; frontRow: boolean };
 export type Assignment = { seatId: string; studentId: string; courseId: string };
 
 export type SeatingResult =
@@ -61,6 +65,20 @@ export function savedRules(constraints: unknown): SeatingRule[] | null {
   if (rule === "none") return [];
   if (isSeatingRule(rule)) return [rule];
   return null;
+}
+
+// The students marked for the front row when the plan was generated, sorted.
+// Plans from before front-row priority had none.
+export function savedFrontRow(constraints: unknown): string[] {
+  if (!constraints || typeof constraints !== "object" || Array.isArray(constraints)) return [];
+  const { frontRow } = constraints as Record<string, unknown>;
+  return Array.isArray(frontRow) ? frontRow.filter((id) => typeof id === "string").sort() : [];
+}
+
+// Whether the students marked for the front row now differ from the ones the
+// plan was generated with, so the plan needs regenerating.
+export function frontRowChanged(constraints: unknown, currentFrontRow: string[]) {
+  return savedFrontRow(constraints).join() !== [...currentFrontRow].sort().join();
 }
 
 // "No rules", or the rules as one sentence: "Empty seat between students,
@@ -196,16 +214,25 @@ function seatGroup(
   }
 
   if (rules.includes("alternate")) return alternate(rows, students, random);
-  return { ok: true, assignments: zip(usable, shuffle(students, random)) };
+  // Usable seats run front to back, so front-row students get the front seats.
+  return { ok: true, assignments: zip(usable, frontRowFirst(students, random)) };
+}
+
+// Students in random order, but everyone marked for the front row first.
+function frontRowFirst(students: StudentInput[], random: () => number) {
+  return [
+    ...shuffle(students.filter((s) => s.frontRow), random),
+    ...shuffle(students.filter((s) => !s.frontRow), random),
+  ];
 }
 
 // Fills the usable seats row by row so that consecutive usable seats in a row
 // never hold the same course. If only one course is left (or a side of the
 // room only has one), every other seat stays empty.
 function alternate(rows: SeatInput[][], students: StudentInput[], random: () => number): SeatingResult {
-  // Shuffled queue of students per course.
+  // Shuffled queue of students per course, front-row students at the head.
   const queues = new Map<string, StudentInput[]>();
-  for (const student of shuffle(students, random)) {
+  for (const student of frontRowFirst(students, random)) {
     queues.set(student.courseId, [...(queues.get(student.courseId) ?? []), student]);
   }
 
@@ -218,12 +245,16 @@ function alternate(rows: SeatInput[][], students: StudentInput[], random: () => 
     for (const seat of row) {
       if (remaining === 0) break;
 
-      // Pick the course with the most students left, other than the one to the
-      // left. Ties are broken randomly so each generation looks different.
-      // Using up the biggest course first keeps the plan as compact as possible.
+      // Pick a course other than the one to the left: the one with the most
+      // front-row students left, then the one with the most students left.
+      // Front-row students of one course can't sit side by side, so seating
+      // the course with the most of them first fits the most into the front.
+      // Ties are broken randomly so each generation looks different. Using up
+      // the biggest course first keeps the plan as compact as possible.
+      const frontRowLeft = (queue: StudentInput[]) => queue.filter((s) => s.frontRow).length;
       const candidates = shuffle([...queues.entries()], random)
         .filter(([courseId, queue]) => queue.length > 0 && courseId !== leftCourse)
-        .sort(([, a], [, b]) => b.length - a.length);
+        .sort(([, a], [, b]) => frontRowLeft(b) - frontRowLeft(a) || b.length - a.length);
 
       if (candidates.length === 0) {
         // Only the neighbour's course has students left: leave this seat empty.

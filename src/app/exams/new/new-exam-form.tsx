@@ -14,18 +14,21 @@ export function NewExamForm({
   courses,
   rooms,
   today,
+  defaults,
 }: {
   courses: CourseOption[];
   rooms: RoomOption[];
   today: string;
+  // Prefilled date and times, so most exams need no changes here.
+  defaults: { date: string; startTime: string; endTime: string };
 }) {
   const [state, formAction, pending] = useActionState(createExam, initialState);
 
   const [courseIds, setCourseIds] = useState<string[]>([]);
   const [roomId, setRoomId] = useState<string | null>(null);
-  const [examDate, setExamDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
+  const [examDate, setExamDate] = useState(defaults.date);
+  const [startTime, setStartTime] = useState(defaults.startTime);
+  const [endTime, setEndTime] = useState(defaults.endTime);
   const [title, setTitle] = useState("");
 
   // A student enrolled in two selected courses still needs only one seat.

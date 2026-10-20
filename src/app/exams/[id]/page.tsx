@@ -9,17 +9,12 @@ import {
   statusLabel,
 } from "@/lib/exams";
 import { getEmailSender, getExamDetail } from "@/lib/queries";
-import { describeRules, isGender, savedRules, seatRows } from "@/lib/seating";
+import { describeRules, frontRowChanged, isGender, savedRules, seatRows } from "@/lib/seating";
 import { isTestAddress } from "@/lib/seat-email";
 import { EmailControls } from "./email-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
-
-const EMAIL_STATUS_LABELS: Record<string, string> = {
-  sent: "Sent",
-  failed: "Failed",
-  skipped: "Skipped",
-};
+import { StudentTable, type StudentRow } from "./student-table";
 
 export default async function ExamPage({ params, searchParams }: PageProps<"/exams/[id]">) {
   const { id } = await params;
@@ -60,20 +55,44 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   );
 
   const seatEmails = new Map(exam.seat_emails.map((e) => [e.student_id, e]));
+  const assignments = new Map(exam.seat_assignments.map((a) => [a.student_id, a]));
+  const frontRowIds = exam.front_row_students.map((f) => f.student_id);
+  const frontRow = new Set(frontRowIds);
 
-  // Seat-by-seat list, front row first.
-  const assignmentRows = exam.seat_assignments
-    .map((a) => ({
-      seat: seatById.get(a.seat_id),
-      occupant: occupants.get(a.seat_id)!,
-      email: seatEmails.get(a.student_id),
-    }))
-    .filter((a) => a.seat)
-    .sort((a, b) => a.seat!.row - b.seat!.row || a.seat!.col - b.seat!.col);
+  // Every student in the exam, under their first course (the same course the
+  // seating plan counts them under) until they have a seat.
+  const studentRows = new Map<string, StudentRow>();
+  const seatOf = new Map<string, { row: number; col: number }>();
+  for (const course of courses) {
+    for (const e of course.enrollments) {
+      if (studentRows.has(e.student_id)) continue;
+      const assignment = assignments.get(e.student_id);
+      const seat = assignment && seatById.get(assignment.seat_id);
+      if (seat) seatOf.set(e.student_id, seat);
+      studentRows.set(e.student_id, {
+        studentId: e.student_id,
+        name: e.students.full_name,
+        studentNumber: e.students.institution_student_id,
+        courseCode: courseCode.get(assignment?.course_id ?? course.id) ?? "",
+        seatCode: seat?.code ?? null,
+        frontRow: frontRow.has(e.student_id),
+        email: seatEmails.get(e.student_id) ?? null,
+      });
+    }
+  }
+  // Seated students front row first, then anyone without a seat by name.
+  const tableRows = [...studentRows.values()].sort((a, b) => {
+    const [seatA, seatB] = [seatOf.get(a.studentId), seatOf.get(b.studentId)];
+    if (seatA && seatB) return seatA.row - seatB.row || seatA.col - seatB.col;
+    if (seatA || seatB) return seatA ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const rules = savedRules(exam.seating_constraints);
   const hasPlan = exam.seat_assignments.length > 0;
   const editable = exam.status === "draft" || exam.status === "generated";
+  const frontRowNeedsRegenerate =
+    hasPlan && editable && frontRowChanged(exam.seating_constraints, frontRowIds);
   const heading = exam.title ?? courses.map((c) => c.course_code).join(", ");
   const room = roomLabel(exam.rooms.name, seats.length);
 
@@ -151,6 +170,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
               hasPlan={hasPlan}
               courseCount={courses.length}
               rowSizes={seatRows(seats).map((row) => row.length)}
+              frontRowChanged={frontRowNeedsRegenerate}
             />
           </div>
         )}
@@ -201,45 +221,21 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
             <div className="mt-4">
               <SeatMap seats={seats} occupants={occupants} />
             </div>
-
-            <table className="mt-10 w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-line text-muted">
-                  <th className="py-2 pr-4 font-normal">Seat</th>
-                  <th className="py-2 pr-4 font-normal">Student</th>
-                  <th className="py-2 pr-4 font-normal">ID</th>
-                  <th className="py-2 pr-4 font-normal">Course</th>
-                  {!editable && <th className="py-2 font-normal">Email</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {assignmentRows.map(({ seat, occupant, email }) => (
-                  <tr key={seat!.id} className="border-b border-line">
-                    <td className="py-2 pr-4 font-mono text-[13px]">{seat!.code}</td>
-                    <td className="py-2 pr-4">{occupant.name}</td>
-                    <td className="py-2 pr-4 tabular-nums text-muted">{occupant.studentNumber}</td>
-                    <td className="py-2 pr-4 font-mono text-[13px]">{occupant.courseCode}</td>
-                    {!editable && (
-                      <td
-                        title={email?.error ?? undefined}
-                        className={
-                          email?.status === "failed"
-                            ? "py-2 text-danger"
-                            : email?.status === "sent"
-                              ? "py-2"
-                              : "py-2 text-muted"
-                        }
-                      >
-                        {email ? (EMAIL_STATUS_LABELS[email.status] ?? email.status) : "Not sent"}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </>
         ) : (
           !editable && <p className="mt-3 text-muted">No seating plan.</p>
+        )}
+
+        {/* Shown before generating too, so front-row students can be picked first. */}
+        {(hasPlan || editable) && (
+          <div className="mt-10">
+            <StudentTable
+              examId={exam.id}
+              rows={tableRows}
+              editable={editable}
+              showEmail={hasPlan && !editable}
+            />
+          </div>
         )}
       </section>
     </>

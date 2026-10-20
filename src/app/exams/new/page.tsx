@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { todayISODate } from "@/lib/exams";
+import { newExamDefaults, todayISODate } from "@/lib/exams";
 import { getCourseOptions, getRoomOptions } from "@/lib/queries";
 import { NewExamForm } from "./new-exam-form";
 
@@ -14,7 +14,12 @@ export default async function NewExamPage() {
         ← Exams
       </Link>
       <h1 className="mt-4 text-2xl font-medium tracking-tight">New exam</h1>
-      <NewExamForm courses={courses} rooms={rooms} today={todayISODate()} />
+      <NewExamForm
+        courses={courses}
+        rooms={rooms}
+        today={todayISODate()}
+        defaults={newExamDefaults()}
+      />
     </>
   );
 }
