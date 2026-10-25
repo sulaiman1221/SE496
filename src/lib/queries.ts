@@ -40,7 +40,7 @@ export async function getExamDetail(id: string) {
     .from("exams")
     .select(
       `id, title, exam_date, start_time, end_time, status, seating_constraints,
-       rooms(name, seats(id, seat_code, row_index, column_index, is_active)),
+       rooms(name, layout_type, seats(id, seat_code, row_index, column_index, is_active)),
        exam_courses(courses(id, course_code, course_name,
          enrollments(student_id, students(full_name, institution_student_id)))),
        front_row_students(student_id),
