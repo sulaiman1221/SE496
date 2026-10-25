@@ -45,6 +45,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
     exam.seat_assignments.map((a) => [
       a.seat_id,
       {
+        studentId: a.student_id,
         name: a.students.full_name,
         studentNumber: a.students.institution_student_id,
         gender: isGender(a.students.gender) ? a.students.gender : null,
@@ -219,7 +220,13 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
               </ul>
             </div>
             <div className="mt-4">
-              <SeatMap seats={seats} occupants={occupants} />
+              <SeatMap
+                examId={exam.id}
+                seats={seats}
+                occupants={occupants}
+                // Students can be moved by hand until the plan is approved.
+                movable={exam.status === "generated"}
+              />
             </div>
           </>
         ) : (

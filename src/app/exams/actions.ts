@@ -279,6 +279,38 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
   return { error: null };
 }
 
+export type MoveStudentState = { error: string | null };
+
+// Moves a student to another seat by hand, swapping with whoever sits there.
+// No seating rules apply; the instructor can put anyone anywhere. Only while
+// the plan is generated and not yet approved.
+export async function moveStudent(
+  examId: string,
+  studentId: string,
+  seatId: string,
+): Promise<MoveStudentState> {
+  if (!isUuid(examId) || !isUuid(studentId) || !isUuid(seatId)) {
+    return { error: "Couldn't move the student. Refresh the page and try again." };
+  }
+
+  const supabase = createServerClient();
+  const { error } = await supabase.rpc("move_student_seat", {
+    p_exam_id: examId,
+    p_student_id: studentId,
+    p_seat_id: seatId,
+  });
+
+  refresh();
+  if (error) {
+    // The function's own messages (P0001) are written for the instructor.
+    return {
+      error:
+        error.code === "P0001" ? error.message : "Couldn't move the student. Try again.",
+    };
+  }
+  return { error: null };
+}
+
 export type FrontRowState = { error: string | null };
 
 // Marks or unmarks one student for the front row of an exam. Only before the

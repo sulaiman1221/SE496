@@ -541,7 +541,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      move_student_seat: {
+        Args: { p_exam_id: string; p_seat_id: string; p_student_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
