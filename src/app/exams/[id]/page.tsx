@@ -219,14 +219,19 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
                 </li>
               </ul>
             </div>
-            <div className="mt-4">
-              <SeatMap
-                examId={exam.id}
-                seats={seats}
-                occupants={occupants}
-                // Students can be moved by hand until the plan is approved.
-                movable={exam.status === "generated"}
-              />
+              <div className="mt-4">
+              {exam.rooms.layout_type === "fan_auditorium" ? (
+                <AuditoriumSeatMap seats={seats} occupants={occupants} />
+              ) : exam.rooms.layout_type === "u_shape" ? (
+                <UShapeSeatMap seats={seats} occupants={occupants} />
+              ) : (
+                <SeatMap
+                  examId={exam.id}
+                  seats={seats}
+                  occupants={occupants}
+                  movable={exam.status === "generated"}
+                />
+              )}
             </div>
           </>
         ) : (
