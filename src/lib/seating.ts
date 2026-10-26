@@ -1,16 +1,26 @@
 // Rule-based seating plan generator.
 //
 // The instructor can combine any of these rules in one plan (or pick none):
-//   spacing   - an empty seat between every two students in a row
-//   rows      - an empty row between every two rows of students
-//   alternate - no two students from the same course next to each other in a
-//               row; a student from another course (or an empty seat) sits in
-//               between. With spacing on, the nearest student across the empty
-//               seat is from a different course too.
+//   spacing      - an empty seat between every two students in a row
+//   checkerboard - like spacing, but shifted by one seat in every other row,
+//                  so nobody sits beside, in front of or behind anyone. It
+//                  already leaves a seat between students, so ticking spacing
+//                  as well gives the same pattern.
+//   rows         - an empty row between every two rows of students
+//   spread       - students spread evenly over the whole room instead of
+//                  filling it from the front
+//   alternate    - no two students from the same course next to each other in
+//                  a row; a student from another course (or an empty seat) sits
+//                  in between. With spacing on, the nearest student across the
+//                  empty seat is from a different course too.
+//
+// Separately, the order students are seated in: random, by student ID, or by
+// name. Ordered seating runs from the front left to the back right.
 //
 // "Side by side" means consecutive seats in the same row, aisles included.
-// Front/back only counts for the rows rule. Students always fill the room from
-// the front; leftover seats at the back stay empty.
+// Front/back only counts for the rows and checkerboard rules. Unless spread
+// out, students fill the room from the front; leftover seats at the back stay
+// empty.
 //
 // Male and female students always sit apart: males on the left side of the
 // room, females on the right (as the seat map shows it, front at the top).
@@ -22,20 +32,37 @@
 // injury) are seated first, in the front-most row their side allows. If there
 // are more of them than the front row holds, the rest go in the next row.
 
-export type SeatingRule = "spacing" | "rows" | "alternate";
+export type SeatingRule = "spacing" | "checkerboard" | "rows" | "spread" | "alternate";
+export type SeatingOrder = "random" | "id" | "name";
 export type Gender = "male" | "female";
 
 // Also the order rules are listed and saved in.
-export const SEATING_RULES: SeatingRule[] = ["spacing", "rows", "alternate"];
+export const SEATING_RULES: SeatingRule[] = ["spacing", "checkerboard", "rows", "spread", "alternate"];
+export const SEATING_ORDERS: SeatingOrder[] = ["random", "id", "name"];
 
 export const RULE_LABELS: Record<SeatingRule, string> = {
   spacing: "Empty seat between students",
+  checkerboard: "Checkerboard",
   rows: "Empty row between students",
+  spread: "Spread across the room",
   alternate: "Alternate courses",
 };
 
+export const ORDER_LABELS: Record<SeatingOrder, string> = {
+  random: "Random order",
+  id: "By student ID",
+  name: "By name",
+};
+
 export type SeatInput = { id: string; code: string; row: number; col: number };
-export type StudentInput = { id: string; courseId: string; gender: Gender; frontRow: boolean };
+export type StudentInput = {
+  id: string;
+  courseId: string;
+  gender: Gender;
+  frontRow: boolean;
+  name: string;
+  studentNumber: string;
+};
 export type Assignment = { seatId: string; studentId: string; courseId: string };
 
 export type SeatingResult =
@@ -44,6 +71,10 @@ export type SeatingResult =
 
 export function isSeatingRule(value: unknown): value is SeatingRule {
   return typeof value === "string" && (SEATING_RULES as string[]).includes(value);
+}
+
+export function isSeatingOrder(value: unknown): value is SeatingOrder {
+  return typeof value === "string" && (SEATING_ORDERS as string[]).includes(value);
 }
 
 export function isGender(value: unknown): value is Gender {
@@ -55,11 +86,18 @@ export function normalizeRules(values: unknown[]): SeatingRule[] {
   return SEATING_RULES.filter((rule) => values.includes(rule));
 }
 
+function constraintsObject(constraints: unknown): Record<string, unknown> | null {
+  return constraints && typeof constraints === "object" && !Array.isArray(constraints)
+    ? (constraints as Record<string, unknown>)
+    : null;
+}
+
 // The rules a plan was generated with, from exams.seating_constraints, or
 // null if no plan has been generated yet.
 export function savedRules(constraints: unknown): SeatingRule[] | null {
-  if (!constraints || typeof constraints !== "object" || Array.isArray(constraints)) return null;
-  const { rules, rule } = constraints as Record<string, unknown>;
+  const saved = constraintsObject(constraints);
+  if (!saved) return null;
+  const { rules, rule } = saved;
   if (Array.isArray(rules)) return normalizeRules(rules);
   // Plans from before rules could be combined saved one rule, or "none".
   if (rule === "none") return [];
@@ -67,11 +105,16 @@ export function savedRules(constraints: unknown): SeatingRule[] | null {
   return null;
 }
 
+// The order a plan seated students in. Plans from before ordering were random.
+export function savedOrder(constraints: unknown): SeatingOrder {
+  const order = constraintsObject(constraints)?.order;
+  return isSeatingOrder(order) ? order : "random";
+}
+
 // The students marked for the front row when the plan was generated, sorted.
 // Plans from before front-row priority had none.
 export function savedFrontRow(constraints: unknown): string[] {
-  if (!constraints || typeof constraints !== "object" || Array.isArray(constraints)) return [];
-  const { frontRow } = constraints as Record<string, unknown>;
+  const frontRow = constraintsObject(constraints)?.frontRow;
   return Array.isArray(frontRow) ? frontRow.filter((id) => typeof id === "string").sort() : [];
 }
 
@@ -102,19 +145,21 @@ export function seatRows(seats: SeatInput[]): SeatInput[][] {
 }
 
 // The spacing rules leave every other row, and every other seat in a row,
-// empty, starting from the front and from the left.
+// empty, starting from the front and from the left. Checkerboard starts one
+// seat further right in every other row it uses, counting only those rows.
 function keepRow(index: number, rules: SeatingRule[]) {
   return !rules.includes("rows") || index % 2 === 0;
 }
 
-function keepSeat(index: number, rules: SeatingRule[]) {
+function keepSeat(index: number, keptRowIndex: number, rules: SeatingRule[]) {
+  if (rules.includes("checkerboard")) return (index + keptRowIndex) % 2 === 0;
   return !rules.includes("spacing") || index % 2 === 0;
 }
 
 function usableRows(rows: SeatInput[][], rules: SeatingRule[]) {
   return rows
     .filter((_, i) => keepRow(i, rules))
-    .map((row) => row.filter((_, i) => keepSeat(i, rules)));
+    .map((row, k) => row.filter((_, i) => keepSeat(i, k, rules)));
 }
 
 // How many students fit once the spacing rules leave their seats empty, given
@@ -123,8 +168,8 @@ function usableRows(rows: SeatInput[][], rules: SeatingRule[]) {
 export function roomCapacity(rowSizes: number[], rules: SeatingRule[]) {
   return rowSizes
     .filter((_, i) => keepRow(i, rules))
-    .reduce((sum, size) => {
-      const kept = Array.from({ length: size }, (_, i) => i).filter((i) => keepSeat(i, rules));
+    .reduce((sum, size, k) => {
+      const kept = Array.from({ length: size }, (_, i) => i).filter((i) => keepSeat(i, k, rules));
       return sum + kept.length;
     }, 0);
 }
@@ -133,7 +178,7 @@ export function generateSeating(
   seats: SeatInput[],
   students: StudentInput[],
   rules: SeatingRule[],
-  random: () => number = Math.random,
+  { order = "random", random = Math.random }: { order?: SeatingOrder; random?: () => number } = {},
 ): SeatingResult {
   if (students.length === 0) {
     return { ok: false, error: "There are no students to seat." };
@@ -142,14 +187,15 @@ export function generateSeating(
     return { ok: false, error: "Alternating courses needs at least two courses in the exam." };
   }
 
+  const options = { rules, order, random };
   const males = students.filter((s) => s.gender === "male");
   const females = students.filter((s) => s.gender === "female");
-  if (males.length === 0 || females.length === 0) return seatGroup(seats, students, rules, random);
+  if (males.length === 0 || females.length === 0) return seatGroup(seats, students, options);
 
   for (const side of roomSplits(seats)) {
-    const left = seatGroup(side.left, males, rules, random);
+    const left = seatGroup(side.left, males, options);
     if (!left.ok) continue;
-    const right = seatGroup(side.right, females, rules, random);
+    const right = seatGroup(side.right, females, options);
     if (!right.ok) continue;
     return { ok: true, assignments: [...left.assignments, ...right.assignments] };
   }
@@ -193,13 +239,11 @@ function roomSplits(seats: SeatInput[]) {
     }));
 }
 
+type GroupOptions = { rules: SeatingRule[]; order: SeatingOrder; random: () => number };
+
 // Seats one group of students in the given seats, following the rules.
-function seatGroup(
-  seats: SeatInput[],
-  students: StudentInput[],
-  rules: SeatingRule[],
-  random: () => number,
-): SeatingResult {
+function seatGroup(seats: SeatInput[], students: StudentInput[], options: GroupOptions): SeatingResult {
+  const { rules, order, random } = options;
   const rows = usableRows(seatRows(seats), rules);
   const usable = rows.flat();
 
@@ -213,26 +257,129 @@ function seatGroup(
     };
   }
 
-  if (rules.includes("alternate")) return alternate(rows, students, random);
-  // Usable seats run front to back, so front-row students get the front seats.
-  return { ok: true, assignments: zip(usable, frontRowFirst(students, random)) };
+  if (rules.includes("spread")) return spread(rows, students, options);
+  if (rules.includes("alternate")) return alternate(rows, students, order, random);
+  // Usable seats run front left to back right, so front-row students get the
+  // front seats and ordered seating reads in order.
+  return { ok: true, assignments: zip(usable, arrange(students, order, random)) };
 }
 
-// Students in random order, but everyone marked for the front row first.
-function frontRowFirst(students: StudentInput[], random: () => number) {
+// Students in the chosen order, everyone marked for the front row first.
+function arrange(students: StudentInput[], order: SeatingOrder, random: () => number) {
+  const sorted = (list: StudentInput[]) =>
+    order === "random" ? shuffle(list, random) : [...list].sort(compareStudents(order));
   return [
-    ...shuffle(students.filter((s) => s.frontRow), random),
-    ...shuffle(students.filter((s) => !s.frontRow), random),
+    ...sorted(students.filter((s) => s.frontRow)),
+    ...sorted(students.filter((s) => !s.frontRow)),
   ];
+}
+
+function compareStudents(order: "id" | "name") {
+  const byId = (a: StudentInput, b: StudentInput) =>
+    a.studentNumber.localeCompare(b.studentNumber, "en", { numeric: true });
+  return order === "id"
+    ? byId
+    : (a: StudentInput, b: StudentInput) => a.name.localeCompare(b.name, "en") || byId(a, b);
+}
+
+// Spreads the students evenly over the usable seats instead of packing them
+// into the front. Front-row students still get seats spaced along the front.
+function spread(rows: SeatInput[][], students: StudentInput[], options: GroupOptions): SeatingResult {
+  const { order, random } = options;
+  const frontRowCount = students.filter((s) => s.frontRow).length;
+  const frontFirst = (a: SeatInput, b: SeatInput) => a.row - b.row || a.col - b.col;
+
+  if (!options.rules.includes("alternate")) {
+    const picked = spreadSeats(rows, frontRowCount, students.length);
+    // arrange() puts front-row students first, so they get the front-row seats.
+    const seatsInOrder = [
+      ...picked.slice(0, frontRowCount).sort(frontFirst),
+      ...picked.slice(frontRowCount).sort(frontFirst),
+    ];
+    return { ok: true, assignments: zip(seatsInOrder, arrange(students, order, random)) };
+  }
+
+  // Alternating courses may need more seats than students, to leave a gap
+  // where only one course is left. Find the fewest spread-out seats that work
+  // (binary search, so big rooms stay fast).
+  const picked = spreadSeats(rows, frontRowCount, rows.flat().length);
+  const tryCount = (count: number) =>
+    alternate(seatRows(picked.slice(0, count)), students, order, random);
+
+  let best = tryCount(students.length);
+  if (best.ok) return best;
+  const all = tryCount(picked.length);
+  if (!all.ok) return all;
+  best = all;
+  let [low, high] = [students.length + 1, picked.length - 1];
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const result = tryCount(mid);
+    if (result.ok) {
+      best = result;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return best;
+}
+
+// Picks `count` seats spread as evenly as possible: each next seat is the one
+// furthest from every seat already picked, starting from the front left.
+// The first `frontRowCount` seats are spaced along the front row instead.
+function spreadSeats(rows: SeatInput[][], frontRowCount: number, count: number): SeatInput[] {
+  const all = rows.flat();
+  const picked: SeatInput[] = [];
+  const isPicked = new Array<boolean>(all.length).fill(false);
+  // Squared distance from each seat to the nearest picked seat.
+  const nearest = new Array<number>(all.length).fill(Infinity);
+
+  const pick = (index: number) => {
+    const seat = all[index];
+    picked.push(seat);
+    isPicked[index] = true;
+    for (let i = 0; i < all.length; i++) {
+      const d = (all[i].row - seat.row) ** 2 + (all[i].col - seat.col) ** 2;
+      if (d < nearest[i]) nearest[i] = d;
+    }
+  };
+
+  // Front-row seats, evenly spaced along the front row, then the next row.
+  let frontLeft = Math.min(frontRowCount, count);
+  for (const row of rows) {
+    if (frontLeft === 0) break;
+    const take = Math.min(frontLeft, row.length);
+    for (let j = 0; j < take; j++) {
+      pick(all.indexOf(row[Math.floor(((j + 0.5) * row.length) / take)]));
+    }
+    frontLeft -= take;
+  }
+
+  while (picked.length < count) {
+    // Ties go to the seat nearest the front left, since seats run that way.
+    let best = -1;
+    for (let i = 0; i < all.length; i++) {
+      if (!isPicked[i] && (best === -1 || nearest[i] > nearest[best])) best = i;
+    }
+    pick(best);
+  }
+  return picked;
 }
 
 // Fills the usable seats row by row so that consecutive usable seats in a row
 // never hold the same course. If only one course is left (or a side of the
 // room only has one), every other seat stays empty.
-function alternate(rows: SeatInput[][], students: StudentInput[], random: () => number): SeatingResult {
-  // Shuffled queue of students per course, front-row students at the head.
+function alternate(
+  rows: SeatInput[][],
+  students: StudentInput[],
+  order: SeatingOrder,
+  random: () => number,
+): SeatingResult {
+  // Queue of students per course, in the chosen order, front-row students at
+  // the head.
   const queues = new Map<string, StudentInput[]>();
-  for (const student of frontRowFirst(students, random)) {
+  for (const student of arrange(students, order, random)) {
     queues.set(student.courseId, [...(queues.get(student.courseId) ?? []), student]);
   }
 

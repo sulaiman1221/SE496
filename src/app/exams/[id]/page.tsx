@@ -5,11 +5,20 @@ import {
   formatExamDate,
   formatTimeRange,
   isUuid,
+  MOVABLE_STATUSES,
   roomLabel,
   statusLabel,
 } from "@/lib/exams";
 import { getEmailSender, getExamDetail } from "@/lib/queries";
-import { describeRules, frontRowChanged, isGender, savedRules, seatRows } from "@/lib/seating";
+import {
+  describeRules,
+  frontRowChanged,
+  isGender,
+  ORDER_LABELS,
+  savedOrder,
+  savedRules,
+  seatRows,
+} from "@/lib/seating";
 import { isTestAddress } from "@/lib/seat-email";
 import { EmailControls } from "./email-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
@@ -90,6 +99,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   });
 
   const rules = savedRules(exam.seating_constraints);
+  const order = rules ? savedOrder(exam.seating_constraints) : null;
   const hasPlan = exam.seat_assignments.length > 0;
   const editable = exam.status === "draft" || exam.status === "generated";
   const frontRowNeedsRegenerate =
@@ -168,6 +178,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
             <SeatingControls
               examId={exam.id}
               planRules={rules}
+              planOrder={order}
               hasPlan={hasPlan}
               courseCount={courses.length}
               rowSizes={seatRows(seats).map((row) => row.length)}
@@ -178,7 +189,11 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
 
         {hasPlan && !editable && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-            <p className="text-muted">This plan is approved and locked.</p>
+            <p className="text-muted">
+              {exam.status === "completed"
+                ? "This exam is completed."
+                : "This plan is approved. Students can still be moved by hand."}
+            </p>
             <a
               href={`/exams/${exam.id}/pdf`}
               download
@@ -196,6 +211,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
             >
               <p className="text-muted tabular-nums">
                 {rules ? `${describeRules(rules)}. ` : ""}
+                {order && order !== "random" ? `${ORDER_LABELS[order]}. ` : ""}
                 {exam.seat_assignments.length} students seated,{" "}
                 {seats.length - exam.seat_assignments.length} seats empty.
               </p>
@@ -222,10 +238,11 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
             <div className="mt-4">
               <SeatMap
                 examId={exam.id}
+                layout={exam.rooms.layout_type}
                 seats={seats}
                 occupants={occupants}
-                // Students can be moved by hand until the plan is approved.
-                movable={exam.status === "generated"}
+                // Until the exam is completed; card readers follow moves straight away.
+                movable={(MOVABLE_STATUSES as string[]).includes(exam.status)}
               />
             </div>
           </>

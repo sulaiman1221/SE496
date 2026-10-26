@@ -20,6 +20,18 @@ export function statusLabel(status: string) {
   return STATUS_LABELS[status as ExamStatus] ?? status;
 }
 
+// Students can be moved by hand from generating the plan until the exam is
+// completed, during the exam too. Matches move_student_seat in the database.
+export const MOVABLE_STATUSES: ExamStatus[] = [
+  "generated",
+  "approved",
+  "notifications_sent",
+  "in_progress",
+];
+
+// Card readers accept check-ins from approval until the exam is completed.
+export const CHECK_IN_STATUSES: ExamStatus[] = ["approved", "notifications_sent", "in_progress"];
+
 // Exam dates are stored as plain calendar dates (YYYY-MM-DD) with no time
 // zone, so format them in UTC to avoid shifting the day.
 export function formatExamDate(date: string, opts?: { withYear?: boolean }) {

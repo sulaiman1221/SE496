@@ -46,6 +46,22 @@ Once a seating plan is approved, the exam page can email each student their seat
 
 Students with test addresses (`@example.com` and similar) are skipped.
 
+## Card readers
+
+Each reader sits at one seat (`readers.seat_id`) and posts every card tap to the app:
+
+```http
+POST /api/attendance/scan
+Authorization: Bearer <READER_API_KEY>
+Content-Type: application/json
+
+{ "exam_id": "<exam uuid>", "reader_id": "R01", "card_uid": "04A1B2C3" }
+```
+
+`reader_id` is the reader's `hardware_identifier`, and `card_uid` must match a student's `rfid_uid` (letter case doesn't matter). The answer is `{ "result": "accepted" | "rejected", "message": "...", "student": "...", "seat": "..." }`: show green for accepted, red for rejected. A wrong-seat rejection includes the seat the student should go to.
+
+A card is accepted only at the seat its student is assigned right now. Instructors can move students during the exam, and readers follow the new seats from the next scan. Every scan is logged in `attendance_scans`, and `attendance` keeps the time each student first checked in. The first accepted scan moves the exam to "In progress".
+
 ## Database changes
 
 Add a new file to `supabase/migrations/` named `<timestamp>_<description>.sql`. When it's merged into `main`, Supabase applies it automatically. Don't edit migrations that have already been applied; add a new one instead.

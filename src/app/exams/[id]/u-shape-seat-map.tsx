@@ -1,6 +1,6 @@
 import { courseColor } from "@/lib/exams";
-import type { Gender, SeatInput } from "@/lib/seating";
-import type { SeatOccupant } from "./seat-map";
+import type { SeatInput } from "@/lib/seating";
+import { GenderMark, Seat, type SeatMoves } from "./seat-moves";
 
 // BG-68: algosaibi room, horseshoe that is open at the bottom. Two concentric table
 // rings (outer: seats 1-33, inner: 34-52, which only covers the top and
@@ -69,18 +69,7 @@ function positions() {
   return points;
 }
 
-const GENDER_MARKS: Record<Gender, { letter: string; color: string }> = {
-  male: { letter: "M", color: "#1d4ed8" },
-  female: { letter: "F", color: "#db2777" },
-};
-
-export function UShapeSeatMap({
-  seats,
-  occupants,
-}: {
-  seats: SeatInput[];
-  occupants: Map<string, SeatOccupant>;
-}) {
+export function UShapeLayout({ seats, moves }: { seats: SeatInput[]; moves: SeatMoves }) {
   const points = positions();
   const byCode = new Map(seats.map((s) => [s.code, s]));
 
@@ -95,7 +84,7 @@ export function UShapeSeatMap({
           if (!seat) return null;
           return (
             <div key={seat.id} className="absolute" style={{ left: x - 15, top: y - 15 }}>
-              <USeatCell seat={seat} occupant={occupants.get(seat.id)} />
+              <USeat seat={seat} moves={moves} />
             </div>
           );
         })}
@@ -104,31 +93,23 @@ export function UShapeSeatMap({
   );
 }
 
-function USeatCell({ seat, occupant }: { seat: SeatInput; occupant?: SeatOccupant }) {
+function USeat({ seat, moves }: { seat: SeatInput; moves: SeatMoves }) {
+  const occupant = moves.shown.get(seat.id);
   const color = occupant ? courseColor(occupant.courseIndex) : null;
-  const mark = occupant?.gender ? GENDER_MARKS[occupant.gender] : null;
   return (
-    <div
-      title={
-        occupant
-          ? `${seat.code}: ${occupant.name} (${occupant.studentNumber}), ${occupant.courseCode}`
-          : `${seat.code}: empty`
-      }
+    <Seat
+      moves={moves}
+      seat={seat}
       className={`relative flex size-[30px] items-center justify-center whitespace-nowrap rounded-full border text-[10px] leading-none ${
         occupant ? "opacity-80" : "border-dashed border-line text-faint"
       }`}
       style={color ? { backgroundColor: color.bg, borderColor: color.border, color: color.text } : undefined}
     >
       {seat.code}
-      {mark && (
-        <span
-          aria-hidden
-          className="absolute -top-1.5 -right-1.5 text-[9px] font-bold"
-          style={{ color: mark.color }}
-        >
-          {mark.letter}
-        </span>
-      )}
-    </div>
+      <GenderMark
+        gender={occupant?.gender ?? null}
+        className="absolute -top-1.5 -right-1.5 text-[9px] font-bold"
+      />
+    </Seat>
   );
 }

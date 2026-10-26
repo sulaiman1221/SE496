@@ -78,6 +78,74 @@ export type Database = {
           },
         ]
       }
+      attendance_scans: {
+        Row: {
+          card_uid: string
+          exam_id: string | null
+          id: string
+          reader_code: string
+          reader_id: string | null
+          reason: string | null
+          result: string
+          scanned_at: string
+          seat_id: string | null
+          student_id: string | null
+        }
+        Insert: {
+          card_uid: string
+          exam_id?: string | null
+          id?: string
+          reader_code: string
+          reader_id?: string | null
+          reason?: string | null
+          result: string
+          scanned_at?: string
+          seat_id?: string | null
+          student_id?: string | null
+        }
+        Update: {
+          card_uid?: string
+          exam_id?: string | null
+          id?: string
+          reader_code?: string
+          reader_id?: string | null
+          reason?: string | null
+          result?: string
+          scanned_at?: string
+          seat_id?: string | null
+          student_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_scans_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_scans_reader_id_fkey"
+            columns: ["reader_id"]
+            isOneToOne: false
+            referencedRelation: "readers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_scans_seat_id_fkey"
+            columns: ["seat_id"]
+            isOneToOne: false
+            referencedRelation: "seats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attendance_scans_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       courses: {
         Row: {
           course_code: string

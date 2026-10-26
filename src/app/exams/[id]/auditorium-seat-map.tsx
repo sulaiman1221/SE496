@@ -1,6 +1,6 @@
 import { courseColor } from "@/lib/exams";
-import type { Gender, SeatInput } from "@/lib/seating";
-import type { SeatOccupant } from "./seat-map";
+import type { SeatInput } from "@/lib/seating";
+import { GenderMark, Seat, type SeatMoves } from "./seat-moves";
 
 // Princess Haya Auditorium:
 // The outer section of each tier (1, 9 at the front; 4, 12 at the back) is
@@ -27,20 +27,9 @@ const SECTION_LAYOUT: { section: string; tier: "front" | "back"; order: number; 
 
 const SEAT_CODE_RE = /^(\d+)-(\d+)-(\d+)$/;
 
-const GENDER_MARKS: Record<Gender, { letter: string; color: string }> = {
-  male: { letter: "M", color: "#1d4ed8" },
-  female: { letter: "F", color: "#db2777" },
-};
-
 type SectionCell = { row: number; col: number; seat: SeatInput };
 
-export function AuditoriumSeatMap({
-  seats,
-  occupants,
-}: {
-  seats: SeatInput[];
-  occupants: Map<string, SeatOccupant>;
-}) {
+export function AuditoriumLayout({ seats, moves }: { seats: SeatInput[]; moves: SeatMoves }) {
   const bySection = new Map<string, SectionCell[]>();
   for (const seat of seats) {
     const m = SEAT_CODE_RE.exec(seat.code);
@@ -66,7 +55,7 @@ export function AuditoriumSeatMap({
                   <SectionBlock
                     section={s.section}
                     cells={bySection.get(s.section) ?? []}
-                    occupants={occupants}
+                    moves={moves}
                     angleDeg={s.angled ? (s.order < 3 ? -7 : 7) : 0}
                   />
                 </div>
@@ -81,12 +70,12 @@ export function AuditoriumSeatMap({
 function SectionBlock({
   section,
   cells,
-  occupants,
+  moves,
   angleDeg,
 }: {
   section: string;
   cells: SectionCell[];
-  occupants: Map<string, SeatOccupant>;
+  moves: SeatMoves;
   angleDeg: number;
 }) {
   const columns = Math.max(1, ...cells.map((c) => c.col));
@@ -102,9 +91,7 @@ function SectionBlock({
         style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
       >
         {cells.map(({ row, col, seat }) => (
-          <div key={seat.id} style={{ gridRow: row, gridColumn: col }}>
-            <SeatCell seat={seat} occupant={occupants.get(seat.id)} />
-          </div>
+          <AuditoriumSeat key={seat.id} seat={seat} moves={moves} row={row} col={col} />
         ))}
       </div>
     </div>
@@ -112,37 +99,41 @@ function SectionBlock({
 }
 
 // 972 seats across 12 sections leaves no room per cell for a code + name
-// (see SeatMap's own cell in seat-map.tsx) -- just the seat's position in
+// (see the grid layout's cell in seat-map.tsx) -- just the seat's position in
 // its row, coloured by course, with a small M/F mark like the plain grid
 // map. Full details are in the tooltip and the student table below.
-function SeatCell({ seat, occupant }: { seat: SeatInput; occupant?: SeatOccupant }) {
+function AuditoriumSeat({
+  seat,
+  moves,
+  row,
+  col,
+}: {
+  seat: SeatInput;
+  moves: SeatMoves;
+  row: number;
+  col: number;
+}) {
+  const occupant = moves.shown.get(seat.id);
   const color = occupant ? courseColor(occupant.courseIndex) : null;
-  const mark = occupant?.gender ? GENDER_MARKS[occupant.gender] : null;
   const seatNumber = seat.code.split("-").at(-1);
   return (
-    <div
-      title={
-        occupant
-          ? `${seat.code}: ${occupant.name} (${occupant.studentNumber}), ${occupant.courseCode}`
-          : `${seat.code}: empty`
-      }
+    <Seat
+      moves={moves}
+      seat={seat}
       className={`relative flex size-6 items-center justify-center whitespace-nowrap rounded-[3px] border text-[10px] leading-none ${
         occupant ? "opacity-80" : "border-dashed border-line text-faint"
       }`}
-      style={
-        color ? { backgroundColor: color.bg, borderColor: color.border, color: color.text } : undefined
-      }
+      style={{
+        gridRow: row,
+        gridColumn: col,
+        ...(color && { backgroundColor: color.bg, borderColor: color.border, color: color.text }),
+      }}
     >
       {seatNumber}
-      {mark && (
-        <span
-          aria-hidden
-          className="absolute -top-1.5 -right-1.5 text-[9px] font-bold"
-          style={{ color: mark.color }}
-        >
-          {mark.letter}
-        </span>
-      )}
-    </div>
+      <GenderMark
+        gender={occupant?.gender ?? null}
+        className="absolute -top-1.5 -right-1.5 text-[9px] font-bold"
+      />
+    </Seat>
   );
 }

@@ -10,6 +10,7 @@ import {
   frontRowChanged,
   generateSeating,
   isGender,
+  isSeatingOrder,
   isSeatingRule,
   normalizeRules,
   type StudentInput,
@@ -118,10 +119,12 @@ export async function generateSeatingPlan(
   _prev: GenerateSeatingState,
   formData: FormData,
 ): Promise<GenerateSeatingState> {
-  // Any combination of rules, including none.
+  // Any combination of rules, including none, and the order to seat students in.
   const values = formData.getAll("rule");
+  const order = formData.get("order") ?? "random";
   if (!isUuid(examId)) return { error: "Exam not found." };
   if (!values.every(isSeatingRule)) return { error: "Choose seating rules from the list." };
+  if (!isSeatingOrder(order)) return { error: "Choose a seat order from the list." };
   const rules = normalizeRules(values);
 
   const supabase = createServerClient();
@@ -155,7 +158,7 @@ export async function generateSeatingPlan(
   const [enrollmentsRes, seatsRes] = await Promise.all([
     supabase
       .from("enrollments")
-      .select("student_id, course_id, students(gender)")
+      .select("student_id, course_id, students(gender, full_name, institution_student_id)")
       .in("course_id", courseIds),
     supabase
       .from("seats")
@@ -181,6 +184,8 @@ export async function generateSeatingPlan(
           courseId,
           gender,
           frontRow: frontRow.has(e.student_id),
+          name: e.students.full_name,
+          studentNumber: e.students.institution_student_id,
         });
       }
     }
@@ -200,7 +205,7 @@ export async function generateSeatingPlan(
     col: s.column_index,
   }));
 
-  const result = generateSeating(seats, [...students.values()], rules);
+  const result = generateSeating(seats, [...students.values()], rules, { order });
   if (!result.ok) return { error: result.error };
 
   // Replace any previous plan for this exam.
@@ -230,7 +235,10 @@ export async function generateSeatingPlan(
   const seatedFrontRow = [...frontRow].filter((id) => students.has(id)).sort();
   const { error: updateError } = await supabase
     .from("exams")
-    .update({ status: "generated", seating_constraints: { rules, frontRow: seatedFrontRow } })
+    .update({
+      status: "generated",
+      seating_constraints: { rules, order, frontRow: seatedFrontRow },
+    })
     .eq("id", exam.id);
   if (updateError) return { error: "The plan was saved but the exam status didn't update. Try again." };
 
@@ -282,8 +290,10 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
 export type MoveStudentState = { error: string | null };
 
 // Moves a student to another seat by hand, swapping with whoever sits there.
-// No seating rules apply; the instructor can put anyone anywhere. Only while
-// the plan is generated and not yet approved.
+// No seating rules apply; the instructor can put anyone anywhere. Allowed
+// until the exam is completed, during the exam too: card readers check the
+// seat plan at every scan, so they accept the new seats straight away, and
+// earlier check-ins are kept.
 export async function moveStudent(
   examId: string,
   studentId: string,
