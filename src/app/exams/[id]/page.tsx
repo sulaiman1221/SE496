@@ -20,10 +20,12 @@ import {
   seatRows,
 } from "@/lib/seating";
 import { isTestAddress } from "@/lib/seat-email";
+import { AuditoriumSeatMap } from "./auditorium-seat-map";
 import { EmailControls } from "./email-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
 import { StudentTable, type StudentRow } from "./student-table";
+import { UShapeSeatMap } from "./u-shape-seat-map";
 
 export default async function ExamPage({ params, searchParams }: PageProps<"/exams/[id]">) {
   const { id } = await params;
