@@ -30,7 +30,20 @@ export const MOVABLE_STATUSES: ExamStatus[] = [
 ];
 
 // Card readers accept check-ins from approval until the exam is completed.
+// These are also the statuses an exam can be completed from.
 export const CHECK_IN_STATUSES: ExamStatus[] = ["approved", "notifications_sent", "in_progress"];
+
+// Seated students with no saved check-in: the ones who missed the exam, once
+// it's completed.
+export function absentStudentIds(
+  seated: { student_id: string }[],
+  attendance: { student_id: string; status: string }[],
+) {
+  const present = new Set(
+    attendance.filter((a) => a.status === "present").map((a) => a.student_id),
+  );
+  return seated.map((s) => s.student_id).filter((id) => !present.has(id));
+}
 
 // Exam dates are stored as plain calendar dates (YYYY-MM-DD) with no time
 // zone, so format them in UTC to avoid shifting the day.

@@ -1,17 +1,27 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  absentStudentIds,
   CHECK_IN_STATUSES,
   courseColor,
   formatExamDate,
+  formatTime,
   formatTimeRange,
   isUuid,
   MOVABLE_STATUSES,
+  newExamDefaults,
   roomLabel,
   statusLabel,
+  todayISODate,
 } from "@/lib/exams";
 import { loadLivePlan } from "@/lib/live-plan";
-import { getEmailSender, getExamDetail } from "@/lib/queries";
+import {
+  getEmailSender,
+  getExamDetail,
+  getExamSummary,
+  getMakeupExams,
+  getRoomOptions,
+} from "@/lib/queries";
 import {
   describeRules,
   frontRowChanged,
@@ -24,6 +34,7 @@ import {
 import { isTestAddress } from "@/lib/seat-email";
 import { EmailControls } from "./email-controls";
 import { LiveLegend, LiveProvider, LiveStatus } from "./live-scans";
+import { CompleteExamButton, MakeupForm, type AbsentStudent } from "./makeup-controls";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
 import { StudentTable, type StudentRow } from "./student-table";
@@ -41,6 +52,15 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
     loadLivePlan(id),
   ]);
   if (!exam) notFound();
+
+  // Makeup exams: the exam this one makes up for, the makeups made for this
+  // one, and the rooms to pick from once it's completed.
+  const completed = exam.status === "completed";
+  const [original, makeups, roomOptions] = await Promise.all([
+    exam.makeup_of ? getExamSummary(exam.makeup_of) : null,
+    getMakeupExams(exam.id),
+    completed ? getRoomOptions() : [],
+  ]);
 
   // Card scans show on the seat map while the exam is open for check-in. The
   // viewer login can only listen; it's sent to the browser to do that.
@@ -60,8 +80,15 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   const courseIndex = new Map(courses.map((c, i) => [c.id, i]));
   const courseCode = new Map(courses.map((c) => [c.id, c.course_code]));
 
+  // A makeup exam has only its listed students; others have everyone enrolled.
+  const listed = exam.exam_students.length
+    ? new Set(exam.exam_students.map((s) => s.student_id))
+    : null;
+  const inExam = (studentId: string) => !listed || listed.has(studentId);
+  const courseCount = (course: (typeof courses)[number]) =>
+    course.enrollments.filter((e) => inExam(e.student_id)).length;
   const studentCount = new Set(
-    courses.flatMap((c) => c.enrollments.map((e) => e.student_id)),
+    courses.flatMap((c) => c.enrollments.map((e) => e.student_id)).filter(inExam),
   ).size;
 
   const seats = exam.rooms.seats
@@ -105,7 +132,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   const seatOf = new Map<string, { row: number; col: number }>();
   for (const course of courses) {
     for (const e of course.enrollments) {
-      if (studentRows.has(e.student_id)) continue;
+      if (studentRows.has(e.student_id) || !inExam(e.student_id)) continue;
       const assignment = assignments.get(e.student_id);
       const seat = assignment && seatById.get(assignment.seat_id);
       if (seat) seatOf.set(e.student_id, seat);
@@ -137,6 +164,25 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   const heading = exam.title ?? courses.map((c) => c.course_code).join(", ");
   const room = roomLabel(exam.rooms.name, seats.length);
 
+  // Once completed: who missed it, for a makeup exam. Anyone already put in an
+  // earlier makeup for this exam starts unticked.
+  const inMakeup = new Set(makeups.flatMap((m) => m.exam_students.map((s) => s.student_id)));
+  const absent: AbsentStudent[] = completed
+    ? absentStudentIds(exam.seat_assignments, exam.attendance)
+        .map((studentId) => {
+          const a = assignments.get(studentId)!;
+          return {
+            studentId,
+            name: a.students.full_name,
+            studentNumber: a.students.institution_student_id,
+            courseCode: courseCode.get(a.course_id) ?? "",
+            seatCode: seatById.get(a.seat_id)?.code ?? "",
+            inMakeup: inMakeup.has(studentId),
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+
   // Students who still need their seat email. Test addresses never get one,
   // so they're counted separately.
   const unsent = exam.seat_assignments.filter((a) => seatEmails.get(a.student_id)?.status !== "sent");
@@ -154,6 +200,19 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
         {formatExamDate(exam.exam_date, { withYear: true })},{" "}
         {formatTimeRange(exam.start_time, exam.end_time)} · {room}
       </p>
+      {original && (
+        <p className="mt-1 text-sm text-muted">
+          Makeup of{" "}
+          <Link href={`/exams/${original.id}`} className="underline underline-offset-2 hover:text-ink">
+            {original.title ??
+              original.exam_courses
+                .map((ec) => ec.courses.course_code)
+                .sort()
+                .join(", ")}
+            , {formatExamDate(original.exam_date, { withYear: true })}
+          </Link>
+        </p>
+      )}
       <p className="mt-3 text-sm">{statusLabel(exam.status)}</p>
 
       <section className="mt-10">
@@ -172,8 +231,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
               <span className="font-mono text-[13px]">{course.course_code}</span>
               <span className="min-w-0 truncate">{course.course_name}</span>
               <span className="text-sm text-muted tabular-nums">
-                {course.enrollments.length}{" "}
-                {course.enrollments.length === 1 ? "student" : "students"}
+                {courseCount(course)} {courseCount(course) === 1 ? "student" : "students"}
               </span>
             </li>
           ))}
@@ -231,7 +289,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
                 ? "This exam is completed."
                 : "This plan is approved. Students can still be moved by hand."}
             </p>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {exam.status !== "completed" && (
                 <Link
                   href={`/exams/${exam.id}/live`}
@@ -239,6 +297,9 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
                 >
                   Open live feed
                 </Link>
+              )}
+              {(CHECK_IN_STATUSES as string[]).includes(exam.status) && (
+                <CompleteExamButton examId={exam.id} />
               )}
               <a
                 href={`/exams/${exam.id}/pdf`}
@@ -311,6 +372,53 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
         )}
       </section>
       </LiveProvider>
+
+      {(completed || makeups.length > 0) && hasPlan && (
+        <section className="mt-10">
+          <h2 className="text-sm font-medium">Absent students and makeup exams</h2>
+
+          {makeups.length > 0 && (
+            <ul className="mt-3 text-sm">
+              {makeups.map((m) => (
+                <li key={m.id}>
+                  <Link href={`/exams/${m.id}`} className="underline underline-offset-2 hover:text-ink">
+                    Makeup exam, {formatExamDate(m.exam_date, { withYear: true })},{" "}
+                    {formatTime(m.start_time)}
+                  </Link>{" "}
+                  <span className="text-muted">
+                    · {m.exam_students.length}{" "}
+                    {m.exam_students.length === 1 ? "student" : "students"} ·{" "}
+                    {statusLabel(m.status)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {completed &&
+            (absent.length === 0 ? (
+              <p className="mt-3 text-muted">Everyone checked in. No makeup exam is needed.</p>
+            ) : (
+              <>
+                <p className="mt-3 text-sm text-muted">
+                  {absent.length} {absent.length === 1 ? "student has" : "students have"} no saved
+                  check-in. Untick anyone who shouldn&apos;t sit a makeup, then choose the room and
+                  time. Taps made while the attendance listener wasn&apos;t running weren&apos;t
+                  saved, so those students show here too.
+                </p>
+                <div className="mt-4">
+                  <MakeupForm
+                    examId={exam.id}
+                    absent={absent}
+                    rooms={roomOptions}
+                    defaults={newExamDefaults()}
+                    today={todayISODate()}
+                  />
+                </div>
+              </>
+            ))}
+        </section>
+      )}
     </>
   );
 }

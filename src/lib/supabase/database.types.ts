@@ -263,6 +263,39 @@ export type Database = {
           },
         ]
       }
+      exam_students: {
+        Row: {
+          created_at: string
+          exam_id: string
+          student_id: string
+        }
+        Insert: {
+          created_at?: string
+          exam_id: string
+          student_id: string
+        }
+        Update: {
+          created_at?: string
+          exam_id?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_students_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exams: {
         Row: {
           created_at: string
@@ -270,6 +303,7 @@ export type Database = {
           end_time: string | null
           exam_date: string
           id: string
+          makeup_of: string | null
           room_id: string
           seating_constraints: Json
           start_time: string
@@ -283,6 +317,7 @@ export type Database = {
           end_time?: string | null
           exam_date: string
           id?: string
+          makeup_of?: string | null
           room_id: string
           seating_constraints?: Json
           start_time: string
@@ -296,6 +331,7 @@ export type Database = {
           end_time?: string | null
           exam_date?: string
           id?: string
+          makeup_of?: string | null
           room_id?: string
           seating_constraints?: Json
           start_time?: string
@@ -304,6 +340,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "exams_makeup_of_fkey"
+            columns: ["makeup_of"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "exams_room_id_fkey"
             columns: ["room_id"]

@@ -31,15 +31,16 @@ export async function getCourseOptions(): Promise<CourseOption[]> {
   }));
 }
 
-// Everything about one exam: room and seats, courses and their students, the
-// seating plan, front-row students, and whether each student has been emailed
-// their seat. Used by the exam page, the seating plan PDF and the seat emails.
+// Everything about one exam: room and seats, courses and their students (or,
+// for a makeup exam, who sits it), the seating plan, front-row students,
+// emails and check-ins. Used by the exam page, the PDF and the seat emails.
 export async function getExamDetail(id: string) {
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("exams")
     .select(
-      `id, title, exam_date, start_time, end_time, status, seating_constraints,
+      `id, title, exam_date, start_time, end_time, status, seating_constraints, makeup_of,
+       exam_students(student_id),
        rooms(name, layout_type, seats(id, seat_code, row_index, column_index, is_active)),
        exam_courses(courses(id, course_code, course_name,
          enrollments(student_id, students(full_name, institution_student_id)))),
@@ -56,6 +57,33 @@ export async function getExamDetail(id: string) {
 }
 
 export type ExamDetail = NonNullable<Awaited<ReturnType<typeof getExamDetail>>>;
+
+// The makeup exams made for an exam, with who sits each one.
+export async function getMakeupExams(examId: string) {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("exams")
+    .select("id, exam_date, start_time, status, exam_students(student_id)")
+    .eq("makeup_of", examId)
+    .order("exam_date")
+    .order("start_time");
+
+  if (error) throw new Error(`Could not load makeup exams: ${error.message}`);
+  return data;
+}
+
+// Just enough about an exam to link to it: for a makeup exam's "Makeup of".
+export async function getExamSummary(examId: string) {
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("exams")
+    .select("id, title, exam_date, exam_courses(courses(course_code))")
+    .eq("id", examId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not load the exam: ${error.message}`);
+  return data;
+}
 
 // The Outlook account seat emails are sent from, or null if none is connected.
 // Leaves out the refresh token, which never needs to reach a page.

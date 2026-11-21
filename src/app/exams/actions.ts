@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
-import { isUuid, todayISODate } from "@/lib/exams";
+import { absentStudentIds, CHECK_IN_STATUSES, isUuid, todayISODate } from "@/lib/exams";
 import { MicrosoftSignInError, refreshTokens, sendMail } from "@/lib/microsoft";
 import { publishLivePlan } from "@/lib/live-plan";
 import { getExamDetail } from "@/lib/queries";
@@ -24,6 +24,17 @@ export type CreateExamState = { error: string | null };
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
+// Checks an exam's date and times; returns what's wrong, or null.
+function scheduleError(examDate: string, startTime: string, endTime: string) {
+  if (!DATE_RE.test(examDate)) return "Enter the exam date.";
+  if (examDate < todayISODate()) return "The exam date can't be in the past.";
+  if (!TIME_RE.test(startTime)) return "Enter a start time.";
+  if (endTime && (!TIME_RE.test(endTime) || endTime <= startTime)) {
+    return "The end time must be after the start time.";
+  }
+  return null;
+}
+
 export async function createExam(
   _prev: CreateExamState,
   formData: FormData,
@@ -41,18 +52,8 @@ export async function createExam(
   if (!isUuid(roomId)) {
     return { error: "Select a room." };
   }
-  if (!DATE_RE.test(examDate)) {
-    return { error: "Enter the exam date." };
-  }
-  if (examDate < todayISODate()) {
-    return { error: "The exam date can't be in the past." };
-  }
-  if (!TIME_RE.test(startTime)) {
-    return { error: "Enter a start time." };
-  }
-  if (endTime && (!TIME_RE.test(endTime) || endTime <= startTime)) {
-    return { error: "The end time must be after the start time." };
-  }
+  const timingError = scheduleError(examDate, startTime, endTime);
+  if (timingError) return { error: timingError };
 
   const supabase = createServerClient();
 
@@ -133,7 +134,7 @@ export async function generateSeatingPlan(
   const { data: exam, error: examError } = await supabase
     .from("exams")
     .select(
-      "id, status, room_id, exam_courses(course_id, courses(course_code)), front_row_students(student_id)",
+      "id, status, room_id, exam_courses(course_id, courses(course_code)), front_row_students(student_id), exam_students(student_id)",
     )
     .eq("id", examId)
     .maybeSingle();
@@ -145,6 +146,10 @@ export async function generateSeatingPlan(
   }
 
   const frontRow = new Set(exam.front_row_students.map((f) => f.student_id));
+  // A makeup exam seats only its listed students, not everyone in its courses.
+  const listed = exam.exam_students.length
+    ? new Set(exam.exam_students.map((s) => s.student_id))
+    : null;
 
   // Course order decides which course a student counts under if they're
   // enrolled in more than one of the exam's courses.
@@ -177,6 +182,7 @@ export async function generateSeatingPlan(
   const missingGender = new Set<string>();
   for (const courseId of courseIds) {
     for (const e of enrollmentsRes.data.filter((e) => e.course_id === courseId)) {
+      if (listed && !listed.has(e.student_id)) continue;
       const gender = e.students.gender;
       if (!isGender(gender)) missingGender.add(e.student_id);
       else if (!students.has(e.student_id)) {
@@ -302,6 +308,121 @@ export async function resendPlanToReaders(examId: string): Promise<{ error: stri
   return publishLivePlan(examId);
 }
 
+export type ExamActionState = { error: string | null };
+
+// Ends the exam: card readers stop accepting check-ins and students can no
+// longer be moved. Whoever has no saved check-in is then counted as absent.
+export async function completeExam(examId: string): Promise<ExamActionState> {
+  if (!isUuid(examId)) return { error: "Exam not found." };
+
+  const supabase = createServerClient();
+  const { data, error } = await supabase
+    .from("exams")
+    .update({ status: "completed" })
+    .eq("id", examId)
+    .in("status", CHECK_IN_STATUSES)
+    .select("id");
+  if (error) return { error: "Couldn't complete the exam. Try again." };
+  if (data.length === 0) return { error: "This exam can't be completed right now. Refresh the page." };
+
+  refresh();
+  return { error: null };
+}
+
+// Creates a makeup exam for students who missed a completed exam. The
+// instructor picks which absent students sit it, and its room and time. It
+// covers only those students and their courses, and then works like any
+// other exam: generate, approve, email, check in.
+export async function createMakeupExam(
+  examId: string,
+  _prev: ExamActionState,
+  formData: FormData,
+): Promise<ExamActionState> {
+  const studentIds = [...new Set(formData.getAll("studentId").map(String))];
+  const roomId = String(formData.get("roomId") ?? "");
+  const examDate = String(formData.get("examDate") ?? "");
+  const startTime = String(formData.get("startTime") ?? "");
+  const endTime = String(formData.get("endTime") ?? "");
+
+  if (!isUuid(examId)) return { error: "Exam not found." };
+  if (studentIds.length === 0 || !studentIds.every(isUuid)) {
+    return { error: "Select at least one student." };
+  }
+  if (!isUuid(roomId)) return { error: "Select a room." };
+  const timingError = scheduleError(examDate, startTime, endTime);
+  if (timingError) return { error: timingError };
+
+  const supabase = createServerClient();
+
+  const [examRes, seatsRes] = await Promise.all([
+    supabase
+      .from("exams")
+      .select(
+        "id, title, status, exam_courses(courses(course_code)), seat_assignments(student_id, course_id), attendance(student_id, status)",
+      )
+      .eq("id", examId)
+      .maybeSingle(),
+    supabase.from("seats").select("id").eq("room_id", roomId).eq("is_active", true),
+  ]);
+  if (examRes.error || seatsRes.error) return { error: "Couldn't load the exam and room. Try again." };
+  const exam = examRes.data;
+  if (!exam) return { error: "Exam not found." };
+  if (exam.status !== "completed") {
+    return { error: "Complete the exam before making a makeup exam." };
+  }
+
+  // Only students who really missed it can be picked.
+  const absent = new Set(absentStudentIds(exam.seat_assignments, exam.attendance));
+  if (!studentIds.every((id) => absent.has(id))) {
+    return { error: "Some of the selected students checked in. Refresh the page." };
+  }
+  if (studentIds.length > seatsRes.data.length) {
+    return {
+      error: `${studentIds.length} students won't fit in a room with ${seatsRes.data.length} seats.`,
+    };
+  }
+
+  // Each student sits the makeup for the course they were seated under.
+  const courseOf = new Map(exam.seat_assignments.map((a) => [a.student_id, a.course_id]));
+  const courseIds = [...new Set(studentIds.map((id) => courseOf.get(id)!))];
+  const originalName =
+    exam.title ??
+    exam.exam_courses
+      .map((ec) => ec.courses.course_code)
+      .sort()
+      .join(", ");
+
+  const { data: makeup, error: makeupError } = await supabase
+    .from("exams")
+    .insert({
+      room_id: roomId,
+      exam_date: examDate,
+      start_time: startTime,
+      end_time: endTime || null,
+      title: `Makeup: ${originalName}`,
+      makeup_of: exam.id,
+    })
+    .select("id")
+    .single();
+  if (makeupError) return { error: "Couldn't create the makeup exam. Try again." };
+
+  const [coursesRes, studentsRes] = await Promise.all([
+    supabase
+      .from("exam_courses")
+      .insert(courseIds.map((courseId) => ({ exam_id: makeup.id, course_id: courseId }))),
+    supabase
+      .from("exam_students")
+      .insert(studentIds.map((studentId) => ({ exam_id: makeup.id, student_id: studentId }))),
+  ]);
+  if (coursesRes.error || studentsRes.error) {
+    // Don't leave a half-made exam behind; its links are deleted with it.
+    await supabase.from("exams").delete().eq("id", makeup.id);
+    return { error: "Couldn't create the makeup exam. Try again." };
+  }
+
+  redirect(`/exams/${makeup.id}`);
+}
+
 export type MoveStudentState = { error: string | null };
 
 // Moves a student to another seat by hand, swapping with whoever sits there.
@@ -357,7 +478,7 @@ export async function setFrontRow(
 
   const { data: exam, error: examError } = await supabase
     .from("exams")
-    .select("status, exam_courses(course_id)")
+    .select("status, exam_courses(course_id), exam_students(student_id)")
     .eq("id", examId)
     .maybeSingle();
   if (examError) return { error: "Couldn't update the front row. Try again." };
@@ -373,6 +494,10 @@ export async function setFrontRow(
     .in("course_id", exam.exam_courses.map((ec) => ec.course_id));
   if (enrolledError) return { error: "Couldn't update the front row. Try again." };
   if (!count) return { error: "This student isn't in the exam." };
+  // A makeup exam only has its listed students.
+  if (exam.exam_students.length && !exam.exam_students.some((s) => s.student_id === studentId)) {
+    return { error: "This student isn't in the exam." };
+  }
 
   const { error } = frontRow
     ? await supabase
