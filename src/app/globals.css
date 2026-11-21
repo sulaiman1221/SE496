@@ -15,6 +15,16 @@
   --accent-hover: #172c47;
   --danger: #9f3a2c;
   --selection: #dfe6ef;
+  /* Live check-in on the seat map */
+  --waiting-bg: #e4e2dd;
+  --waiting-border: #c3bfb6;
+  --waiting-text: #4a463f;
+  --present-bg: #cfeed8;
+  --present-border: #6fb98a;
+  --present-text: #14532d;
+  --denied-bg: #f6cccc;
+  --denied-border: #d27a7a;
+  --denied-text: #7f1d1d;
 }
 
 :root[data-theme="dark"] {
@@ -30,6 +40,15 @@
   --accent-hover: #4a76ad;
   --danger: #e2806f;
   --selection: #2c3d55;
+  --waiting-bg: #2c2b27;
+  --waiting-border: #4a4842;
+  --waiting-text: #b9b5ac;
+  --present-bg: #1f4a2c;
+  --present-border: #3f8c5b;
+  --present-text: #bff0cf;
+  --denied-bg: #5a2323;
+  --denied-border: #a35151;
+  --denied-text: #f6c4c4;
 }
 
 @theme inline {

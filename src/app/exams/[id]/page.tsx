@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  CHECK_IN_STATUSES,
   courseColor,
   formatExamDate,
   formatTimeRange,
@@ -9,6 +10,7 @@ import {
   roomLabel,
   statusLabel,
 } from "@/lib/exams";
+import { loadLivePlan } from "@/lib/live-plan";
 import { getEmailSender, getExamDetail } from "@/lib/queries";
 import {
   describeRules,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/seating";
 import { isTestAddress } from "@/lib/seat-email";
 import { EmailControls } from "./email-controls";
+import { LiveLegend, LiveProvider, LiveStatus } from "./live-scans";
 import { SeatMap, type SeatOccupant } from "./seat-map";
 import { SeatingControls } from "./seating-controls";
 import { StudentTable, type StudentRow } from "./student-table";
@@ -32,8 +35,24 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   // Set by the Microsoft sign-in callback when connecting an account fails.
   const { emailError } = await searchParams;
 
-  const [exam, sender] = await Promise.all([getExamDetail(id), getEmailSender()]);
+  const [exam, sender, livePlan] = await Promise.all([
+    getExamDetail(id),
+    getEmailSender(),
+    loadLivePlan(id),
+  ]);
   if (!exam) notFound();
+
+  // Card scans show on the seat map while the exam is open for check-in. The
+  // viewer login can only listen; it's sent to the browser to do that.
+  const hivemq = {
+    host: process.env.HIVEMQ_HOST,
+    user: process.env.HIVEMQ_VIEWER_USER,
+    pass: process.env.HIVEMQ_VIEWER_PASS,
+  };
+  const broker =
+    hivemq.host && hivemq.user && hivemq.pass && (CHECK_IN_STATUSES as string[]).includes(exam.status)
+      ? { host: hivemq.host, user: hivemq.user, pass: hivemq.pass }
+      : null;
 
   const courses = exam.exam_courses
     .map((ec) => ec.courses)
@@ -65,6 +84,17 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
   );
 
   const seatEmails = new Map(exam.seat_emails.map((e) => [e.student_id, e]));
+
+  // Check-ins saved by the attendance listener, by student name like the live
+  // scans, so they still show after the page is reloaded.
+  const nameOf = new Map(exam.seat_assignments.map((a) => [a.student_id, a.students.full_name]));
+  const checkedIn: Record<string, string> = {};
+  for (const a of exam.attendance) {
+    const name = nameOf.get(a.student_id);
+    if (a.status === "present" && a.checked_in_at && name) {
+      checkedIn[name] = new Date(a.checked_in_at).toLocaleTimeString("en-GB", { hour12: false });
+    }
+  }
   const assignments = new Map(exam.seat_assignments.map((a) => [a.student_id, a]));
   const frontRowIds = exam.front_row_students.map((f) => f.student_id);
   const frontRow = new Set(frontRowIds);
@@ -170,8 +200,15 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
         </section>
       )}
 
+      <LiveProvider
+        examId={exam.id}
+        broker={broker}
+        initialReaders={livePlan?.readers ?? {}}
+        initialPresent={checkedIn}
+      >
       <section className="mt-10">
         <h2 className="text-sm font-medium">Seating plan</h2>
+        <LiveStatus />
 
         {editable && (
           <div className="mt-4">
@@ -194,13 +231,23 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
                 ? "This exam is completed."
                 : "This plan is approved. Students can still be moved by hand."}
             </p>
-            <a
-              href={`/exams/${exam.id}/pdf`}
-              download
-              className="rounded-[5px] border border-line bg-surface px-4 py-2 text-sm font-medium transition-colors hover:bg-hover"
-            >
-              Download PDF
-            </a>
+            <div className="flex flex-wrap gap-3">
+              {exam.status !== "completed" && (
+                <Link
+                  href={`/exams/${exam.id}/live`}
+                  className="rounded-[5px] bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+                >
+                  Open live feed
+                </Link>
+              )}
+              <a
+                href={`/exams/${exam.id}/pdf`}
+                download
+                className="rounded-[5px] border border-line bg-surface px-4 py-2 text-sm font-medium transition-colors hover:bg-hover"
+              >
+                Download PDF
+              </a>
+            </div>
           </div>
         )}
 
@@ -233,6 +280,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
                   <span aria-hidden className="size-3 rounded-[3px] border border-dashed border-faint" />
                   Empty
                 </li>
+                <LiveLegend />
               </ul>
             </div>
             <div className="mt-4">
@@ -262,6 +310,7 @@ export default async function ExamPage({ params, searchParams }: PageProps<"/exa
           </div>
         )}
       </section>
+      </LiveProvider>
     </>
   );
 }

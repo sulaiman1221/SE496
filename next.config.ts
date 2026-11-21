@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/exams/**": ["./src/assets/fonts/*", "./public/alfaisal-logo.png"],
   },
+  // The MQTT client is loaded by Node at runtime, not bundled.
+  serverExternalPackages: ["mqtt"],
   // Stop next dev from adding extra docs files to the project.
   agentRules: false,
 };

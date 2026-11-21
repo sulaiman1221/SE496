@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useOptimistic, useState } from "react";
 import type { Gender, SeatInput } from "@/lib/seating";
 import { moveStudent } from "../actions";
+import { useLive } from "./live-scans";
 
 // Shared by every seat map layout (grid, auditorium, U shape): who sits where,
 // the M/F marks, and moving students by hand, by dragging (mouse) or by
@@ -179,6 +180,27 @@ export function Seat({
 }) {
   const occupant = moves.shown.get(seat.id);
   const { movable, selected, dragFrom } = moves;
+
+  // With a card reader at this seat: grey until the student taps their card,
+  // then green; red for a moment when someone else's card is tapped.
+  const live = useLive();
+  let liveStyle: React.CSSProperties | undefined;
+  let liveNote = "";
+  if (live.enabled && occupant && live.readerSeats.has(seat.code)) {
+    const denial = live.denied.get(seat.code);
+    const presentAt = live.present.get(occupant.name);
+    const tone = denial ? "denied" : presentAt ? "present" : "waiting";
+    liveStyle = {
+      backgroundColor: `var(--${tone}-bg)`,
+      borderColor: `var(--${tone}-border)`,
+      color: `var(--${tone}-text)`,
+    };
+    liveNote = denial
+      ? `. Wrong card: ${denial.name} at ${denial.time}`
+      : presentAt
+        ? `. Present since ${presentAt}`
+        : ". Not scanned yet";
+  }
   const isSelected = selected === seat.id;
   const isDropTarget = moves.dropTarget === seat.id && dragFrom !== seat.id;
   // A button when students can be moved, so taps and the keyboard work.
@@ -189,7 +211,7 @@ export function Seat({
       type={movable ? "button" : undefined}
       aria-pressed={movable && occupant ? isSelected : undefined}
       onClick={movable ? () => moves.tap(seat.id) : undefined}
-      title={seatTitle(seat, occupant)}
+      title={seatTitle(seat, occupant) + liveNote}
       draggable={movable && !!occupant}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
@@ -220,7 +242,7 @@ export function Seat({
       ]
         .filter(Boolean)
         .join(" ")}
-      style={style}
+      style={{ ...style, ...liveStyle }}
     >
       {children}
     </Cell>

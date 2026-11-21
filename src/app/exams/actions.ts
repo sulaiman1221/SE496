@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
 import { isUuid, todayISODate } from "@/lib/exams";
 import { MicrosoftSignInError, refreshTokens, sendMail } from "@/lib/microsoft";
+import { publishLivePlan } from "@/lib/live-plan";
 import { getExamDetail } from "@/lib/queries";
 import {
   frontRowChanged,
@@ -283,8 +284,22 @@ export async function approveSeatingPlan(examId: string): Promise<ApproveState> 
   if (error) return { error: "Couldn't approve the plan. Try again." };
   if (data.length === 0) return { error: "This plan can't be approved right now. Refresh the page." };
 
+  // Tell the card readers who sits where. The plan is approved either way; if
+  // HiveMQ can't be reached the instructor can resend it from the live feed.
+  const sent = await publishLivePlan(examId);
+
   refresh();
+  if (sent.error) {
+    return { error: `The plan is approved, but it wasn't sent to the card readers. ${sent.error}` };
+  }
   return { error: null };
+}
+
+// Sends the current seating plan to the card readers again. Used from the
+// live feed page when the readers have missed it.
+export async function resendPlanToReaders(examId: string): Promise<{ error: string | null }> {
+  if (!isUuid(examId)) return { error: "Exam not found." };
+  return publishLivePlan(examId);
 }
 
 export type MoveStudentState = { error: string | null };
@@ -317,6 +332,12 @@ export async function moveStudent(
       error:
         error.code === "P0001" ? error.message : "Couldn't move the student. Try again.",
     };
+  }
+
+  // The card readers follow the new seats.
+  const sent = await publishLivePlan(examId);
+  if (sent.error) {
+    return { error: `The student was moved, but the card readers weren't updated. ${sent.error}` };
   }
   return { error: null };
 }

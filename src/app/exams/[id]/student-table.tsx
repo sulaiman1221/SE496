@@ -2,6 +2,7 @@
 
 import { startTransition, useOptimistic, useState } from "react";
 import { setFrontRow } from "../actions";
+import { useLive } from "./live-scans";
 
 export type StudentRow = {
   studentId: string;
@@ -34,6 +35,7 @@ export function StudentTable({
   editable: boolean;
   showEmail: boolean;
 }) {
+  const live = useLive();
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Ticks show straight away; the page catches up once the change is saved.
@@ -91,7 +93,8 @@ export function StudentTable({
             <th className="py-2 pr-4 font-normal">ID</th>
             <th className="py-2 pr-4 font-normal">Course</th>
             {editable && <th className="py-2 font-normal">Front row</th>}
-            {showEmail && <th className="py-2 font-normal">Email</th>}
+            {showEmail && <th className="py-2 pr-4 font-normal">Email</th>}
+            {live.enabled && <th className="py-2 font-normal">Check-in</th>}
           </tr>
         </thead>
         <tbody>
@@ -119,10 +122,10 @@ export function StudentTable({
                   title={row.email?.error ?? undefined}
                   className={
                     row.email?.status === "failed"
-                      ? "py-2 text-danger"
+                      ? "py-2 pr-4 text-danger"
                       : row.email?.status === "sent"
-                        ? "py-2"
-                        : "py-2 text-muted"
+                        ? "py-2 pr-4"
+                        : "py-2 pr-4 text-muted"
                   }
                 >
                   {row.email
@@ -130,11 +133,22 @@ export function StudentTable({
                     : "Not sent"}
                 </td>
               )}
+              {live.enabled && (
+                <td className="py-2 tabular-nums">
+                  {live.present.has(row.name) ? (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      Present {live.present.get(row.name)}
+                    </span>
+                  ) : row.seatCode && live.readerSeats.has(row.seatCode) ? (
+                    <span className="text-muted">Not scanned</span>
+                  ) : null}
+                </td>
+              )}
             </tr>
           ))}
           {shown.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-4 text-muted">
+              <td colSpan={7} className="py-4 text-muted">
                 No students match “{query.trim()}”.
               </td>
             </tr>

@@ -45,7 +45,8 @@ export async function getExamDetail(id: string) {
          enrollments(student_id, students(full_name, institution_student_id)))),
        front_row_students(student_id),
        seat_assignments(seat_id, student_id, course_id, students(full_name, institution_student_id, email, gender)),
-       seat_emails(student_id, status, error)`,
+       seat_emails(student_id, status, error),
+       attendance(student_id, status, checked_in_at)`,
     )
     .eq("id", id)
     .maybeSingle();

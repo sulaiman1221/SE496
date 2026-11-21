@@ -62,6 +62,18 @@ Content-Type: application/json
 
 A card is accepted only at the seat its student is assigned right now. Instructors can move students during the exam, and readers follow the new seats from the next scan. Every scan is logged in `attendance_scans`, and `attendance` keeps the time each student first checked in. The first accepted scan moves the exam to "In progress".
 
+## Live check-in (ESP32 + HiveMQ)
+
+The demo hardware is an ESP32 with five card readers, connected through HiveMQ Cloud. When a plan is approved or a student is moved, the app publishes the seating plan to `access/plan`; the ESP32 shows green or red itself and reports each tap on `access/seat<N>/granted` or `access/seat<N>/alert`. The exam page and the live feed (`/exams/<id>/live`) show taps as they happen. Set the `HIVEMQ_*` keys in `.env.local` (see `.env.example`).
+
+To keep attendance, run the listener next to the app during the exam:
+
+```bash
+npm run listen
+```
+
+It saves every tap: accepted ones mark the student present in `attendance` (with the time they first checked in), and every tap goes into `attendance_scans`. Taps made while it isn't running still show on the readers but aren't saved. Students without a `present` row afterwards missed the exam.
+
 ## Database changes
 
 Add a new file to `supabase/migrations/` named `<timestamp>_<description>.sql`. When it's merged into `main`, Supabase applies it automatically. Don't edit migrations that have already been applied; add a new one instead.
